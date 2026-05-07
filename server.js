@@ -6,6 +6,24 @@ const WebSocket = require("ws");
 const fs = require("fs");
 const path = require("path");
 
+
+//LOGS
+const logsDir = "./logs";
+
+if (!fs.existsSync(logsDir)) {
+  fs.mkdirSync(logsDir);
+}
+
+function writeCallLog(callId, data) {
+  const filePath = path.join(logsDir, `${callId}.json`);
+
+  fs.writeFileSync(
+    filePath,
+    JSON.stringify(data, null, 2),
+    "utf8"
+  );
+}
+
 const systemPrompt = fs.readFileSync(
   "./Prompt-Barracuda.txt",
   "utf8"
@@ -113,6 +131,21 @@ const wss = new WebSocket.Server({ server, path: "/ws" });
 wss.on("connection", (ws) => {
   console.log("Twilio connecté");
 
+  const callId = Date.now().toString();
+
+const callLog = {
+  callId,
+  startedAt: new Date().toISOString(),
+  endedAt: null,
+  durationSeconds: null,
+  events: [],
+  messages: [],
+  shopifySearches: [],
+  errors: []
+};
+
+console.log("Call ID:", callId);
+
   let streamSid = null;
 
   const aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
@@ -137,6 +170,18 @@ wss.on("connection", (ws) => {
           voice: "ash",
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
+
+        input_audio_transcription: {
+        model: "gpt-4o-mini-transcribe"
+        },
+
+      turn_detection: {
+        type: "server_vad",
+        threshold: 0.9,
+        prefix_padding_ms: 500,
+        silence_duration_ms: 1200,
+        },
+
           turn_detection: {
             type: "server_vad",
             threshold: 0.9,
@@ -148,7 +193,7 @@ wss.on("connection", (ws) => {
 ${systemPrompt}
 
 BASE DE CONNAISSANCE :
-${knowledge1}
+${knowledgeBase}
 
 RÈGLES IMPORTANTES POUR LA VOIX :
 
@@ -237,10 +282,19 @@ ADRESSE :
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
 
-    if (data.event === "start") {
-      streamSid = data.start.streamSid;
-      console.log("Appel commencé");
-    }
+  if (data.event === "start") {
+  streamSid = data.start.streamSid;
+
+  console.log("Appel commencé");
+
+  callLog.events.push({
+    type: "call_started",
+    time: new Date().toISOString(),
+    streamSid: data.start.streamSid
+  });
+
+  writeCallLog(callId, callLog);
+}
 
     if (data.event === "media") {
       if (aiSocket.readyState === WebSocket.OPEN) {
@@ -257,77 +311,136 @@ ADRESSE :
   /* =========================
      AUDIO OPENAI → TWILIO
   ========================= */
+aiSocket.on("message", async (msg) => {
+  const response = JSON.parse(msg);
 
-  aiSocket.on("message", async (msg) => {
-    const response = JSON.parse(msg);
-
-    if (response.type === "response.audio.delta" && streamSid) {
-      ws.send(
-        JSON.stringify({
-          event: "media",
-          streamSid,
-          media: { payload: response.delta },
-        })
-      );
-    }
-
-    if (response.type === "response.function_call_arguments.done") {
-      const args = JSON.parse(response.arguments);
-
-      const shopifyData = await searchShopifyProducts(args.query);
-      const product =
-        shopifyData?.data?.products?.edges?.[0]?.node;
-
-      let result;
-
-      if (!product) {
-        result = "Aucun produit trouvé.";
-      } else {
-        const variant = product.variants.edges[0]?.node;
-
-        result = {
-          title: product.title,
-          price: `${variant?.price} CAD`,
-          stock: variant?.inventoryQuantity,
-        };
-      }
-
-      aiSocket.send(
-        JSON.stringify({
-          type: "conversation.item.create",
-          item: {
-            type: "function_call_output",
-            call_id: response.call_id,
-            output: JSON.stringify(result),
-          },
-        })
-      );
-
-      aiSocket.send(JSON.stringify({ type: "response.create" }));
-    }
+if (response.type === "conversation.item.input_audio_transcription.completed") {
+  callLog.messages.push({
+    role: "user",
+    text: response.transcript || "",
+    time: new Date().toISOString()
   });
+
+  try {
+    writeCallLog(callId, callLog);
+    console.log("USER LOGGED:", response.transcript);
+  } catch (err) {
+    console.error("LOG WRITE ERROR USER:", err);
+  }
+}
+
+if (response.type === "response.audio_transcript.delta") {
+  if (!callLog.currentAssistantText) {
+    callLog.currentAssistantText = "";
+  }
+
+  callLog.currentAssistantText += response.delta || "";
+}
+
+if (response.type === "response.audio_transcript.done") {
+  const finalText =
+    response.transcript ||
+    response.text ||
+    callLog.currentAssistantText ||
+    "";
+
+  callLog.messages.push({
+    role: "assistant",
+    text: finalText,
+    time: new Date().toISOString()
+  });
+
+  console.log("AI LOGGED:", finalText);
+
+ 
+    callLog.currentAssistantText = "";
+
+    writeCallLog(callId, callLog);
+  }
+
+  if (response.type === "response.audio.delta" && streamSid) {
+    ws.send(
+      JSON.stringify({
+        event: "media",
+        streamSid,
+        media: { payload: response.delta },
+      })
+    );
+  }
+
+  if (response.type === "response.function_call_arguments.done") {
+    const args = JSON.parse(response.arguments);
+
+    const shopifyData = await searchShopifyProducts(args.query);
+
+    const product =
+      shopifyData?.data?.products?.edges?.[0]?.node;
+
+    let result;
+
+    if (!product) {
+      result = "Aucun produit trouvé.";
+    } else {
+      const variant = product.variants.edges[0]?.node;
+
+      result = {
+        title: product.title,
+        price: `${variant?.price} CAD`,
+        stock: variant?.inventoryQuantity,
+      };
+    }
+
+    aiSocket.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: response.call_id,
+          output: JSON.stringify(result),
+        },
+      })
+    );
+
+    aiSocket.send(
+      JSON.stringify({ type: "response.create" })
+    );
+  }
+});
 
   /* =========================
      CLOSE / ERROR
   ========================= */
 
-  ws.on("close", () => {
-    console.log("Twilio fermé");
+ws.on("close", () => {
+  try {
+    callLog.endedAt = new Date().toISOString();
 
-    if (aiSocket.readyState === WebSocket.OPEN) {
-      aiSocket.close();
-    }
-  });
+    callLog.durationSeconds = Math.round(
+      (new Date(callLog.endedAt) - new Date(callLog.startedAt)) / 1000
+    );
 
-  aiSocket.on("close", () => {
-    console.log("OpenAI fermé");
-  });
+    callLog.events.push({
+      type: "call_ended",
+      time: new Date().toISOString()
+    });
 
-  aiSocket.on("error", (err) => {
-    console.error("Erreur OpenAI:", err.message);
-  });
+    writeCallLog(callId, callLog);
+  } catch (err) {
+    console.error("Erreur log fermeture:", err.message);
+  }
 
-  ws.on("error", (err) => {
-    console.error("Erreur Twilio:", err.message);
-  });
+  console.log("Twilio fermé");
+
+  if (aiSocket.readyState === WebSocket.OPEN) {
+    aiSocket.close();
+  }
+});
+
+aiSocket.on("error", (err) => {
+  console.error("Erreur OpenAI:", err);
+});
+
+ws.on("error", (err) => {
+  console.error("Erreur Twilio:", err.message);
+});
 });
