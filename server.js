@@ -184,7 +184,7 @@ console.log("Call ID:", callId);
 
           turn_detection: {
             type: "server_vad",
-            threshold: 0.9,
+            threshold: 1.1,
             prefix_padding_ms: 500,
             silence_duration_ms: 1200,
           },
@@ -200,7 +200,7 @@ RÈGLES IMPORTANTES POUR LA VOIX :
 LANGUE :
 - Tu peux parler français et anglais.
 - Choisis la langue principale du client dans les premières secondes de l’appel.
-- Une fois la langue détectée, garde cette langue pour toute la conversation.
+- Une fois la langue détectée, garde cette langue pour toute la conversation à moins que le client change clairement de langue.
 - Si la conversation commence en français, reste entièrement en français.
 - Si la conversation commence en anglais, reste entièrement en anglais.
 - Ne change pas de langue pour des mots isolés comme "okay", "yeah", "perfect", "thanks".
