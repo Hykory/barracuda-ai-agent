@@ -7,6 +7,15 @@ const fs = require("fs");
 const path = require("path");
 
 
+const twilio = require("twilio");
+
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
+
+const HUMAN_PHONE_NUMBER = process.env.HUMAN_PHONE_NUMBER;
+
 //LOGS
 const logsDir = "./logs";
 
@@ -78,7 +87,7 @@ async function searchShopifyProducts(query) {
                 node {
                   title
                   totalInventory
-                  variants(first: 1) {
+                  variants(first: 3) {
                     edges {
                       node {
                         price
@@ -147,6 +156,34 @@ const callLog = {
 console.log("Call ID:", callId);
 
   let streamSid = null;
+  let callSid = null;
+  let pendingTransfer = false;
+
+  async function transferCallToHuman() {
+  if (!callSid) {
+    console.error("Impossible de transférer : callSid manquant.");
+    return {
+      success: false,
+      message: "Impossible de transférer l’appel pour le moment.",
+    };
+  }
+
+  const twiml = `
+<Response>
+  <Say language="fr-CA">
+    Je vais vous transférer à quelqu’un de l’équipe. Un instant s’il vous plaît.
+  </Say>
+
+  <Dial>${HUMAN_PHONE_NUMBER}</Dial>
+</Response>`;
+
+  await twilioClient.calls(callSid).update({ twiml });
+
+  return {
+    success: true,
+    message: "Transfert en cours.",
+  };
+}
 
   const aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
     headers: {
@@ -181,13 +218,6 @@ console.log("Call ID:", callId);
         prefix_padding_ms: 500,
         silence_duration_ms: 1200,
         },
-
-          turn_detection: {
-            type: "server_vad",
-            threshold: 0.9,
-            prefix_padding_ms: 500,
-            silence_duration_ms: 1200,
-          },
           
           instructions: `
 ${systemPrompt}
@@ -226,28 +256,48 @@ INTERDICTION :
 - Exemple correct : "Voulez-vous que je vous explique comment tester le pH ?"
 
 SHOPIFY :
-- Si le client demande un produit, utilise search_shopify_products.
+SHOPIFY :
+- Si le client cherche à acheter, demande un prix, demande si un produit est disponible, ou mentionne qu’il veut un produit précis, appelle search_shopify_products.
+- Si le client pose une question de conseil général, réponds d'abord brièvement, sans vendre immédiatement.
+- Après un conseil, tu peux proposer doucement : "Je peux aussi vérifier ce qu’on a en stock si vous voulez."
+- Utilise un terme de recherche simple : "chlore", "pH plus", "algaecide", "filtre", etc.
+- Si plusieurs produits sont retournés, propose maximum 2 ou 3 options avec le nom, le prix et le stock.
+- Si un seul produit est retourné, annonce-le simplement avec le prix et le stock.
+- Ne récite pas toute la liste si ce n’est pas nécessaire.
 - Ne jamais inventer de stock.
 - Ne jamais inventer de prix.
-- Si tu n'es pas certain, transfère à un humain.
+- Si aucun produit n’est trouvé, dis-le simplement et propose de passer en magasin ou de parler à quelqu’un.
+- Garde un ton naturel, aidant et non vendeur.
+
+TRANSFERT HUMAIN :
+- si le client demande à parler à quelqu’un, à un humain, à un employé ou demande un transfert, appelle immédiatement la fonction transfer_call_to_human.
+- Dis TOUJOURS avant le transfert : "Je vais vous transférer à quelqu’un de l’équipe. Un instant s’il vous plaît."
+- Si le client dit "je veux parler à quelqu’un", "je veux parler à un humain", "transférez-moi", "je veux un employé", ou toute phrase similaire, appelle immédiatement la fonction transfer_call_to_human.
+- Ne réponds pas avec du texte avant d’appeler la fonction.
+- Ne pose aucune question de clarification.
+- N’explique rien.
+- Appelle obligatoirement transfer_call_to_human avec reason: "client demande un humain".
 
 ADRESSE :
 - Français : Nous sommes situés au 110 Georges, à Gatineau, secteur Encan Masson.
 - English : We’re located at 110 Georges in Gatineau, in the Encan Masson area.
 `,
-          tools: [
-            {
-              type: "function",
-              name: "search_shopify_products",
-              parameters: {
-                type: "object",
-                properties: {
-                  query: { type: "string" },
-                },
-                required: ["query"],
-              },
-            },
-          ],
+ tools: [
+  {
+    type: "function",
+    name: "search_shopify_products",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+      },
+      required: ["query"],
+    },
+  },
+],
+
+tool_choice: "auto",
+          
         },
       })
     );
@@ -282,15 +332,18 @@ ADRESSE :
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
 
-  if (data.event === "start") {
+if (data.event === "start") {
   streamSid = data.start.streamSid;
+  callSid = data.start.callSid;
 
   console.log("Appel commencé");
+  console.log("Call SID:", callSid);
 
   callLog.events.push({
     type: "call_started",
     time: new Date().toISOString(),
-    streamSid: data.start.streamSid
+    streamSid: data.start.streamSid,
+    callSid: data.start.callSid,
   });
 
   writeCallLog(callId, callLog);
@@ -314,16 +367,92 @@ ADRESSE :
 aiSocket.on("message", async (msg) => {
   const response = JSON.parse(msg);
 
+  console.log(
+    "OPENAI EVENT:",
+    response.type,
+    response.name || ""
+  );
+
+  if (response.type === "response.done" && pendingTransfer) {
+  pendingTransfer = false;
+
+  console.log("TRANSFERT APRÈS RESPONSE DONE");
+
+  await new Promise((resolve) => {
+    setTimeout(resolve, 4500);
+  });
+
+  await transferCallToHuman();
+  return;
+}
+
 if (response.type === "conversation.item.input_audio_transcription.completed") {
+  const userText = response.transcript || "";
+  const normalizedText = userText.toLowerCase();
+
   callLog.messages.push({
     role: "user",
-    text: response.transcript || "",
+    text: userText,
     time: new Date().toISOString()
   });
 
+  console.log("USER LOGGED:", userText);
+
+  const wantsHuman =
+  normalizedText.includes("parler à quelqu") ||
+  normalizedText.includes("parler a quelqu") ||
+  normalizedText.includes("parler à un humain") ||
+  normalizedText.includes("parler a un humain") ||
+  normalizedText.includes("parler à une personne") ||
+  normalizedText.includes("parler a une personne") ||
+  normalizedText.includes("je veux un humain") ||
+  normalizedText.includes("je veux quelqu") ||
+  normalizedText.includes("humain") ||
+  normalizedText.includes("transfert") ||
+  normalizedText.includes("transférer") ||
+  normalizedText.includes("transferer") ||
+  normalizedText.includes("employé") ||
+  normalizedText.includes("employe");
+
+  console.log("DEBUG wantsHuman:", wantsHuman);
+  console.log("DEBUG userText:", userText);
+console.log("DEBUG normalizedText:", normalizedText);
+
+  if (wantsHuman) {
+    console.log("TRANSFERT DÉTECTÉ PAR TEXTE");
+
+    callLog.events.push({
+      type: "transfer_requested",
+      reason: "client demande un humain",
+      time: new Date().toISOString(),
+    });
+
+    writeCallLog(callId, callLog);
+
+    pendingTransfer = true;
+
+    aiSocket.send(
+      JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: "Réponds uniquement avec cette phrase exacte, sans rien ajouter : Je vais vous transférer à quelqu’un de l’équipe. Un instant s’il vous plaît.",
+            },
+          ],
+        },
+      })
+    );
+
+    aiSocket.send(JSON.stringify({ type: "response.create" }));
+    return;
+  }
+
   try {
     writeCallLog(callId, callLog);
-    console.log("USER LOGGED:", response.transcript);
   } catch (err) {
     console.error("LOG WRITE ERROR USER:", err);
   }
@@ -356,6 +485,8 @@ if (response.type === "response.audio_transcript.done") {
     callLog.currentAssistantText = "";
 
     writeCallLog(callId, callLog);
+
+
   }
 
   if (response.type === "response.audio.delta" && streamSid) {
@@ -368,25 +499,46 @@ if (response.type === "response.audio_transcript.done") {
     );
   }
 
-  if (response.type === "response.function_call_arguments.done") {
-    const args = JSON.parse(response.arguments);
+if (response.type === "response.function_call_arguments.done") {
+  console.log(
+    "FUNCTION CALL:",
+    response.name,
+    response.call_id,
+    response.arguments
+  );
 
+  const args = JSON.parse(response.arguments);
+
+  if (response.name === "search_shopify_products") {
     const shopifyData = await searchShopifyProducts(args.query);
 
-    const product =
-      shopifyData?.data?.products?.edges?.[0]?.node;
+    callLog.shopifySearches.push({
+      query: args.query,
+      time: new Date().toISOString(),
+      raw: shopifyData,
+    });
+
+    const products = shopifyData?.data?.products?.edges || [];
 
     let result;
 
-    if (!product) {
-      result = "Aucun produit trouvé.";
-    } else {
-      const variant = product.variants.edges[0]?.node;
-
+    if (products.length === 0) {
       result = {
-        title: product.title,
-        price: `${variant?.price} CAD`,
-        stock: variant?.inventoryQuantity,
+        found: false,
+        message: "Aucun produit trouvé.",
+      };
+    } else {
+      result = {
+        found: true,
+        products: products.map(({ node: product }) => ({
+          title: product.title,
+          totalStock: product.totalInventory,
+          variants: product.variants.edges.map(({ node: variant }) => ({
+            format: variant.title !== "Default Title" ? variant.title : null,
+            price: `${variant.price} CAD`,
+            stock: variant.inventoryQuantity,
+          })),
+        })),
       };
     }
 
@@ -401,46 +553,50 @@ if (response.type === "response.audio_transcript.done") {
       })
     );
 
-    aiSocket.send(
-      JSON.stringify({ type: "response.create" })
-    );
+    aiSocket.send(JSON.stringify({ type: "response.create" }));
+    return;
   }
+}
 });
 
   /* =========================
      CLOSE / ERROR
   ========================= */
 
-ws.on("close", () => {
-  try {
-    callLog.endedAt = new Date().toISOString();
+  /* =========================
+     CLOSE / ERROR
+  ========================= */
 
-    callLog.durationSeconds = Math.round(
-      (new Date(callLog.endedAt) - new Date(callLog.startedAt)) / 1000
-    );
+  ws.on("close", () => {
+    try {
+      callLog.endedAt = new Date().toISOString();
 
-    callLog.events.push({
-      type: "call_ended",
-      time: new Date().toISOString()
-    });
+      callLog.durationSeconds = Math.round(
+        (new Date(callLog.endedAt) - new Date(callLog.startedAt)) / 1000
+      );
 
-    writeCallLog(callId, callLog);
-  } catch (err) {
-    console.error("Erreur log fermeture:", err.message);
-  }
+      callLog.events.push({
+        type: "call_ended",
+        time: new Date().toISOString()
+      });
 
-  console.log("Twilio fermé");
+      writeCallLog(callId, callLog);
+    } catch (err) {
+      console.error("Erreur log fermeture:", err.message);
+    }
 
-  if (aiSocket.readyState === WebSocket.OPEN) {
-    aiSocket.close();
-  }
-});
+    console.log("Twilio fermé");
 
-aiSocket.on("error", (err) => {
-  console.error("Erreur OpenAI:", err);
-});
+    if (aiSocket.readyState === WebSocket.OPEN) {
+      aiSocket.close();
+    }
+  });
 
-ws.on("error", (err) => {
-  console.error("Erreur Twilio:", err.message);
-});
-});
+  aiSocket.on("error", (err) => {
+    console.error("Erreur OpenAI:", err);
+  });
+
+  ws.on("error", (err) => {
+    console.error("Erreur Twilio:", err.message);
+  });
+});  
