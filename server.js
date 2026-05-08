@@ -281,6 +281,10 @@ console.log("Call ID:", callId);
   let callSid = null;
   let pendingTransfer = false;
 
+  let isInterrupted = false;
+  let currentAiItemId = null;
+  let currentAudioDurationMs = 0;
+
   async function transferCallToHuman() {
   if (!callSid) {
     console.error("Impossible de transférer : callSid manquant.");
@@ -493,6 +497,43 @@ aiSocket.on("message", async (msg) => {
     response.name || ""
   );
 
+  if (response.type === "input_audio_buffer.speech_started") {
+    console.log("🛑 INTERRUPTION — speech started");
+
+    currentAudioDurationMs = 0;
+    isInterrupted = true;
+
+    if (streamSid) {
+      ws.send(JSON.stringify({
+        event: "clear",
+        streamSid,
+      }));
+      console.log("🔇 Twilio audio cleared");
+    }
+
+    if (currentAiItemId) {
+      aiSocket.send(JSON.stringify({
+        type: "conversation.item.truncate",
+        item_id: currentAiItemId,
+        content_index: 0,
+        audio_end_ms: currentAudioDurationMs,
+      }));
+      console.log(`✂️ Truncate → item ${currentAiItemId} à ${currentAudioDurationMs}ms`);
+    }
+  }
+
+  if (response.type === "input_audio_buffer.speech_stopped") {
+    console.log("🎙️ speech stopped — reset interruption");
+    isInterrupted = false;
+  }
+
+  if (response.type === "response.output_item.added") {
+    currentAiItemId = response.item?.id ?? null;
+    currentAudioDurationMs = 0;
+    isInterrupted = false;
+    console.log("🎯 Nouvel item AI:", currentAiItemId);
+  }
+
   if (response.type === "response.done" && pendingTransfer) {
   pendingTransfer = false;
 
@@ -562,7 +603,7 @@ console.log("DEBUG normalizedText:", normalizedText);
           content: [
             {
               type: "input_text",
-              text: "Réponds uniquement avec cette phrase exacte, sans rien ajouter : Je vais vous transférer à quelqu’un de l’équipe. Un instant s’il vous plaît.",
+              text: "Réponds uniquement avec cette phrase exacte, sans rien ajouter : Je vais vous transférer à quelqu'un de l'équipe. Un instant s'il vous plaît.",
             },
           ],
         },
@@ -603,15 +644,19 @@ if (response.type === "response.audio_transcript.done") {
 
   console.log("AI LOGGED:", finalText);
 
- 
     callLog.currentAssistantText = "";
 
     writeCallLog(callId, callLog);
-
-
   }
 
   if (response.type === "response.audio.delta" && streamSid) {
+    if (isInterrupted) {
+      return;
+    }
+
+    const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
+    currentAudioDurationMs += payloadBytes / 8;
+
     ws.send(
       JSON.stringify({
         event: "media",
@@ -728,7 +773,7 @@ if (orders.length === 0) {
   result = {
     found: false,
     message:
-      "Aucune commande trouvée. Je vais vous transférer à quelqu’un de l’équipe. Un instant s’il vous plaît.",
+      "Aucune commande trouvée. Je vais vous transférer à quelqu'un de l'équipe. Un instant s'il vous plaît.",
   };
 
   pendingTransfer = true;
@@ -791,7 +836,6 @@ if (orders.length === 0) {
 }  // ferme if (response.type === "response.function_call_arguments.done")
 
 }); // ferme aiSocket.on("message", ...)
-
   /* =========================
      CLOSE / ERROR
   ========================= */
