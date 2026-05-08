@@ -65,6 +65,11 @@ const OPENAI_REALTIME_URL =
 const app = express();
 const PORT = 3000;
 
+app.set("view engine", "ejs");
+app.set("views", path.join(__dirname, "views"));
+
+app.use("/public", express.static("public"));
+
 app.use(express.json());
 
 /* =========================
@@ -201,9 +206,47 @@ app.post("/voice", (req, res) => {
   res.send(twiml);
 });
 
+
+
 /* =========================
    SERVER
 ========================= */
+
+app.get("/dashboard", (req, res) => {
+  console.log("DASHBOARD ROUTE HIT");
+
+  const logFiles = fs.readdirSync("./logs");
+
+  const logs = logFiles.map((file) => {
+    const raw = fs.readFileSync(
+      path.join("./logs", file),
+      "utf8"
+    );
+
+    return JSON.parse(raw);
+  });
+
+  const totalCalls = logs.length;
+
+  const transferredCalls = logs.filter((log) =>
+    log.events?.some(
+      (e) => e.type === "transfer_requested"
+    )
+  ).length;
+
+  const avgDuration =
+    logs.reduce(
+      (sum, log) => sum + (log.durationSeconds || 0),
+      0
+    ) / (logs.length || 1);
+
+  res.render("dashboard", {
+    totalCalls,
+    transferredCalls,
+    avgDuration,
+    logs,
+  });
+});
 
 const server = app.listen(PORT, () => {
   console.log(`Serveur lancé sur http://localhost:${PORT}`);
@@ -374,21 +417,6 @@ ADRESSE :
 - Français : Nous sommes situés au 110 Georges, à Gatineau, secteur Encan Masson.
 - English : We’re located at 110 Georges in Gatineau, in the Encan Masson area.
 `,
- tools: [
-  {
-    type: "function",
-    name: "search_shopify_products",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-      },
-      required: ["query"],
-    },
-  },
-],
-
-tool_choice: "auto",
           
         },
       })
