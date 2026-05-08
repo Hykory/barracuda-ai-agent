@@ -326,27 +326,57 @@ console.log("Call ID:", callId);
     console.log("OpenAI connecté");
 
     aiSocket.send(
-      JSON.stringify({
-        type: "session.update",
-        session: {
-          modalities: ["text", "audio"],
-          voice: "ash",
-          input_audio_format: "g711_ulaw",
-          output_audio_format: "g711_ulaw",
+  JSON.stringify({
+    type: "session.update",
+    session: {
+      modalities: ["text", "audio"],
+      voice: "ash",
+      input_audio_format: "g711_ulaw",
+      output_audio_format: "g711_ulaw",
 
-        input_audio_transcription: {
+      input_audio_transcription: {
         model: "gpt-4o-mini-transcribe"
-        },
+      },
 
       turn_detection: {
         type: "server_vad",
         threshold: 0.9,
         prefix_padding_ms: 500,
         silence_duration_ms: 1200,
+      },
+
+      tools: [
+        {
+          type: "function",
+          name: "search_shopify_products",
+          description: "Cherche des produits dans l'inventaire Shopify. Appelle cette fonction dès que le client demande un produit, un prix, ou si quelque chose est disponible.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Terme de recherche ex: chlore, algaecide, filtre" },
+            },
+            required: ["query"],
+          },
         },
-          
-          instructions: `
+        {
+          type: "function",
+          name: "search_shopify_orders",
+          description: "Cherche une commande Shopify par numéro de commande.",
+          parameters: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Numéro de commande ex: #1045" },
+            },
+            required: ["query"],
+          },
+        },
+      ],
+
+      tool_choice: "auto",
+
+      instructions: `
 ${systemPrompt}
+// ... reste identique
 
 BASE DE CONNAISSANCE :
 ${knowledgeBase}
@@ -393,6 +423,14 @@ SHOPIFY :
 - Ne jamais inventer de prix.
 - Si aucun produit n’est trouvé, dis-le simplement et propose de passer en magasin ou de parler à quelqu’un.
 - Garde un ton naturel, aidant et non vendeur.
+- Si le client répond "oui", "yes", "ok" après une proposition de produit, c'est une CONFIRMATION D'ACHAT.
+- Après une confirmation d'achat, dis UNIQUEMENT : "Parfait ! Venez le chercher en magasin au 110 Georges, à Gatineau, secteur Encan Masson !" (ou en anglais si le client parle anglais).
+- Ne propose JAMAIS d'autres produits après une confirmation.
+- Ne pose JAMAIS de question de suivi après une confirmation.
+- Ne fais JAMAIS une nouvelle recherche Shopify après une confirmation.
+- Ne récite pas d'autres produits. La conversation sur ce produit est terminée.
+
+
 
 COMMANDES SHOPIFY :
 - Tu as accès aux commandes Shopify avec la fonction search_shopify_orders.
@@ -550,6 +588,14 @@ aiSocket.on("message", async (msg) => {
 if (response.type === "conversation.item.input_audio_transcription.completed") {
   const userText = response.transcript || "";
   const normalizedText = userText.toLowerCase();
+  const shortReplyOnly =
+  ["oui", "yes", "ok", "okay", "non", "no", "allo", "hello", "salut", "bonjour", "olá"]
+    .includes(normalizedText.trim());
+
+if (shortReplyOnly) {
+  console.log("RÉPONSE COURTE - PAS DE RECHERCHE SHOPIFY");
+  return;
+}
 
   callLog.messages.push({
     role: "user",
