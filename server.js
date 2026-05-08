@@ -228,6 +228,7 @@ const callLog = {
   events: [],
   messages: [],
   shopifySearches: [],
+  shopifyOrderSearches: [],
   errors: []
 };
 
@@ -678,6 +679,14 @@ if (response.name === "search_shopify_orders") {
 
 
   const shopifyData = await searchShopifyOrders(query);
+
+  callLog.shopifyOrderSearches.push({
+  query,
+  time: new Date().toISOString(),
+  raw: shopifyData,
+});
+
+writeCallLog(callId, callLog);
 
   console.log(
     "SHOPIFY ORDER SEARCH:",
