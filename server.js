@@ -108,6 +108,84 @@ async function searchShopifyProducts(query) {
   return await response.json();
 }
 
+async function searchShopifyOrders(query) {
+  const response = await fetch(
+    `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_TOKEN,
+      },
+      body: JSON.stringify({
+        query: `
+          query SearchOrders($query: String!) {
+            orders(first: 5, query: $query, sortKey: CREATED_AT, reverse: true) {
+              edges {
+                node {
+                  name
+                  email
+                  phone
+                  displayFulfillmentStatus
+                  displayFinancialStatus
+                  createdAt
+                  totalPriceSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  fulfillments(first: 5) {
+                    trackingInfo {
+                      company
+                      number
+                      url
+                    }
+                  }
+                  customer {
+                    firstName
+                    lastName
+                  }
+                }
+              }
+            }
+          }
+        `,
+        variables: { query },
+      }),
+    }
+  );
+
+  return await response.json();
+}
+
+
+tools: [
+  {
+    type: "function",
+    name: "search_shopify_products",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    type: "function",
+    name: "search_shopify_orders",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+      },
+      required: ["query"],
+    },
+  },
+],
+
+
 /* =========================
    ROUTE TWILIO
 ========================= */
@@ -256,7 +334,6 @@ INTERDICTION :
 - Exemple correct : "Voulez-vous que je vous explique comment tester le pH ?"
 
 SHOPIFY :
-SHOPIFY :
 - Si le client cherche à acheter, demande un prix, demande si un produit est disponible, ou mentionne qu’il veut un produit précis, appelle search_shopify_products.
 - Si le client pose une question de conseil général, réponds d'abord brièvement, sans vendre immédiatement.
 - Après un conseil, tu peux proposer doucement : "Je peux aussi vérifier ce qu’on a en stock si vous voulez."
@@ -268,6 +345,20 @@ SHOPIFY :
 - Ne jamais inventer de prix.
 - Si aucun produit n’est trouvé, dis-le simplement et propose de passer en magasin ou de parler à quelqu’un.
 - Garde un ton naturel, aidant et non vendeur.
+
+COMMANDES SHOPIFY :
+- Tu as accès aux commandes Shopify avec la fonction search_shopify_orders.
+- Si le client veut suivre une commande, connaître le statut d’une commande, savoir où est sa commande, ou donne un numéro de commande, appelle search_shopify_orders.
+- Si le client donne un numéro de commande, cherche avec ce numéro, exemple : "#1045".
+- Ne dis jamais que tu n’as pas accès aux commandes.
+- Si une commande n’est pas trouvée, dis simplement que tu ne la trouves pas avec l’information donnée.
+- Ne cherche JAMAIS une commande sans information précise.
+- Tu dois avoir  :
+  - un numéro de commande complet
+- Si l’information est incomplète, demande plus de détails avant d’appeler search_shopify_orders.
+- Ne jamais deviner une commande.
+- Ne jamais utiliser une recherche vague.
+- Ne jamais appeler search_shopify_orders sans numéro de commande complet.
 
 TRANSFERT HUMAIN :
 - si le client demande à parler à quelqu’un, à un humain, à un employé ou demande un transfert, appelle immédiatement la fonction transfer_call_to_human.
@@ -429,6 +520,8 @@ console.log("DEBUG normalizedText:", normalizedText);
 
     writeCallLog(callId, callLog);
 
+    console.log("COMMANDE INTROUVABLE - TRANSFERT PROGRAMMÉ");
+
     pendingTransfer = true;
 
     aiSocket.send(
@@ -509,46 +602,72 @@ if (response.type === "response.function_call_arguments.done") {
 
   const args = JSON.parse(response.arguments);
 
-  if (response.name === "search_shopify_products") {
-    const shopifyData = await searchShopifyProducts(args.query);
+if (response.name === "search_shopify_products") {
+  const shopifyData = await searchShopifyProducts(args.query);
 
-    callLog.shopifySearches.push({
-      query: args.query,
-      time: new Date().toISOString(),
-      raw: shopifyData,
-    });
+  callLog.shopifySearches.push({
+    query: args.query,
+    time: new Date().toISOString(),
+    raw: shopifyData,
+  });
 
-    const products = shopifyData?.data?.products?.edges || [];
+  const products = shopifyData?.data?.products?.edges || [];
 
-    let result;
+  let result;
 
-    if (products.length === 0) {
-      result = {
-        found: false,
-        message: "Aucun produit trouvé.",
-      };
-    } else {
-      result = {
-        found: true,
-        products: products.map(({ node: product }) => ({
-          title: product.title,
-          totalStock: product.totalInventory,
-          variants: product.variants.edges.map(({ node: variant }) => ({
-            format: variant.title !== "Default Title" ? variant.title : null,
-            price: `${variant.price} CAD`,
-            stock: variant.inventoryQuantity,
-          })),
+  if (products.length === 0) {
+    result = {
+      found: false,
+      message: "Aucun produit trouvé.",
+    };
+  } else {
+    result = {
+      found: true,
+      products: products.map(({ node: product }) => ({
+        title: product.title,
+        totalStock: product.totalInventory,
+        variants: product.variants.edges.map(({ node: variant }) => ({
+          format: variant.title !== "Default Title" ? variant.title : null,
+          price: `${variant.price} CAD`,
+          stock: variant.inventoryQuantity,
         })),
-      };
-    }
+      })),
+    };
+  }
 
+  aiSocket.send(
+    JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: response.call_id,
+        output: JSON.stringify(result),
+      },
+    })
+  );
+
+  aiSocket.send(JSON.stringify({ type: "response.create" }));
+  return;
+}
+
+if (response.name === "search_shopify_orders") {
+  const query = args.query?.trim();
+  const isValidOrderSearch =
+  query && query.startsWith("#");
+
+
+  if (!isValidOrderSearch) {
     aiSocket.send(
       JSON.stringify({
         type: "conversation.item.create",
         item: {
           type: "function_call_output",
           call_id: response.call_id,
-          output: JSON.stringify(result),
+          output: JSON.stringify({
+            found: false,
+            message:
+              "Information insuffisante pour rechercher une commande. Demande le numéro de commande, le courriel ou le téléphone.",
+          }),
         },
       })
     );
@@ -556,12 +675,85 @@ if (response.type === "response.function_call_arguments.done") {
     aiSocket.send(JSON.stringify({ type: "response.create" }));
     return;
   }
-}
-});
 
-  /* =========================
-     CLOSE / ERROR
-  ========================= */
+
+  const shopifyData = await searchShopifyOrders(query);
+
+  console.log(
+    "SHOPIFY ORDER SEARCH:",
+    JSON.stringify(shopifyData, null, 2)
+  );
+
+  const orders = shopifyData?.data?.orders?.edges || [];
+
+  let result;
+if (orders.length === 0) {
+  result = {
+    found: false,
+    message:
+      "Aucune commande trouvée. Je vais vous transférer à quelqu’un de l’équipe. Un instant s’il vous plaît.",
+  };
+
+  pendingTransfer = true;
+
+  aiSocket.send(
+    JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: response.call_id,
+        output: JSON.stringify(result),
+      },
+    })
+  );
+
+  aiSocket.send(JSON.stringify({ type: "response.create" }));
+
+  return;
+}
+   else {
+    result = {
+      found: true,
+      orders: orders.map(({ node: order }) => ({
+        orderNumber: order.name,
+        customerName: order.customer
+          ? `${order.customer.firstName || ""} ${order.customer.lastName || ""}`.trim()
+          : null,
+        email: order.email,
+        phone: order.phone,
+        paymentStatus: order.displayFinancialStatus,
+        fulfillmentStatus: order.displayFulfillmentStatus,
+        createdAt: order.createdAt,
+        total: `${order.totalPriceSet.shopMoney.amount} ${order.totalPriceSet.shopMoney.currencyCode}`,
+        tracking: order.fulfillments.flatMap((fulfillment) =>
+          fulfillment.trackingInfo.map((tracking) => ({
+            company: tracking.company,
+            number: tracking.number,
+            url: tracking.url,
+          }))
+        ),
+      })),
+    };
+  }
+
+  aiSocket.send(
+    JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: response.call_id,
+        output: JSON.stringify(result),
+      },
+    })
+  );
+
+  aiSocket.send(JSON.stringify({ type: "response.create" }));
+  return;
+}
+
+}  // ferme if (response.type === "response.function_call_arguments.done")
+
+}); // ferme aiSocket.on("message", ...)
 
   /* =========================
      CLOSE / ERROR
@@ -599,4 +791,4 @@ if (response.type === "response.function_call_arguments.done") {
   ws.on("error", (err) => {
     console.error("Erreur Twilio:", err.message);
   });
-});  
+});
