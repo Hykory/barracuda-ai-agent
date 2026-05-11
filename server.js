@@ -5,6 +5,13 @@ const express = require("express");
 const WebSocket = require("ws");
 const fs = require("fs");
 const path = require("path");
+const voiceRoutes = require("./routes/voice");
+const { writeCallLog } = require("./services/logs");
+const {
+  searchShopifyProducts,
+  searchShopifyOrders,
+} = require("./services/shopify");
+const { createTransferService } = require("./services/twilioTransfer");
 
 
 const twilio = require("twilio");
@@ -15,23 +22,12 @@ const twilioClient = twilio(
 );
 
 const HUMAN_PHONE_NUMBER = process.env.HUMAN_PHONE_NUMBER;
+const transferCallToHuman = createTransferService(
+  twilioClient,
+  HUMAN_PHONE_NUMBER
+);
 
-//LOGS
-const logsDir = "./logs";
 
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir);
-}
-
-function writeCallLog(callId, data) {
-  const filePath = path.join(logsDir, `${callId}.json`);
-
-  fs.writeFileSync(
-    filePath,
-    JSON.stringify(data, null, 2),
-    "utf8"
-  );
-}
 
 const systemPrompt = fs.readFileSync(
   "./Prompt-Barracuda.txt",
@@ -72,140 +68,11 @@ app.use("/public", express.static("public"));
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-
-/* =========================
-   SHOPIFY (VERSION SIMPLE)
-========================= */
-async function searchShopifyProducts(query) {
-  const response = await fetch(
-    `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_TOKEN,
-      },
-      body: JSON.stringify({
-        query: `
-          query SearchProducts($query: String!) {
-            products(first: 5, query: $query) {
-              edges {
-                node {
-                  title
-                  totalInventory
-                  variants(first: 3) {
-                    edges {
-                      node {
-                        price
-                        inventoryQuantity
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        `,
-        variables: { query },
-      }),
-    }
-  );
-
-  return await response.json();
-}
-
-async function searchShopifyOrders(query) {
-  const response = await fetch(
-    `https://${process.env.SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": process.env.SHOPIFY_ADMIN_TOKEN,
-      },
-      body: JSON.stringify({
-        query: `
-          query SearchOrders($query: String!) {
-            orders(first: 5, query: $query, sortKey: CREATED_AT, reverse: true) {
-              edges {
-                node {
-                  name
-                  email
-                  phone
-                  displayFulfillmentStatus
-                  displayFinancialStatus
-                  createdAt
-                  totalPriceSet {
-                    shopMoney {
-                      amount
-                      currencyCode
-                    }
-                  }
-                  fulfillments(first: 5) {
-                    trackingInfo {
-                      company
-                      number
-                      url
-                    }
-                  }
-                  customer {
-                    firstName
-                    lastName
-                  }
-                }
-              }
-            }
-          }
-        `,
-        variables: { query },
-      }),
-    }
-  );
-
-  return await response.json();
-}
+app.use("/", voiceRoutes);
 
 
 
-/* =========================
-   ROUTE TWILIO
-========================= */
-app.post("/voice", (req, res) => {
-  const twiml = `
-<Response>
-  <Gather numDigits="1" action="/voice/language" method="POST" timeout="5">
-    <Say language="fr-CA">Pour le français, appuyez sur 1.</Say>
-    <Say language="en-US">For English, press 2.</Say>
-  </Gather>
-  <Redirect method="POST">/voice/language?Digits=1</Redirect>
-</Response>`;
 
-  res.type("text/xml");
-  res.send(twiml);
-});
-
-app.post("/voice/language", (req, res) => {
-  console.log("BODY:", req.body);
-  console.log("QUERY:", req.query);
-
-  const digit = req.body.Digits || req.query.Digits || "1";
-  console.log("CHIFFRE APPUYÉ:", digit);
-
-  const lang = digit === "2" ? "en" : "fr";
-  console.log("LANGUE CHOISIE:", lang);
-
-  const twiml = `
-<Response>
-  <Connect>
-  <Stream url="wss://stopping-absurd-nuzzle.ngrok-free.dev/ws">
-  <Parameter name="language" value="${lang}" />
-</Stream>
-  </Connect>
-</Response>`;
-
-  res.type("text/xml");
-  res.send(twiml);
-});
 
 
 
@@ -261,7 +128,7 @@ const wss = new WebSocket.Server({ server, path: "/ws" });
 
 wss.on("connection", (ws, req) => {
 
-  let selectedLanguage = "fr";
+  
   let isFrench = true;
 
   console.log("Twilio connecté");
@@ -299,9 +166,8 @@ if (data.event === "start") {
   const languageParam =
     data.start.customParameters?.language || "fr";
 
-  selectedLanguage = languageParam;
 
-  isFrench = selectedLanguage !== "en";
+  isFrench = languageParam !== "en";
 
   streamSid = data.start.streamSid;
   callSid = data.start.callSid;
@@ -323,31 +189,11 @@ if (data.event === "start") {
   }
 });
 
-  async function transferCallToHuman() {
-  if (!callSid) {
-    console.error("Impossible de transférer : callSid manquant.");
-    return {
-      success: false,
-      message: "Impossible de transférer l’appel pour le moment.",
-    };
-  }
+   
+  
 
-  const twiml = `
-<Response>
-  <Say language="fr-CA">
-    Je vais vous transférer à quelqu’un de l’équipe. Un instant s’il vous plaît.
-  </Say>
 
-  <Dial>${HUMAN_PHONE_NUMBER}</Dial>
-</Response>`;
 
-  await twilioClient.calls(callSid).update({ twiml });
-
-  return {
-    success: true,
-    message: "Transfert en cours.",
-  };
-}
 
   const aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
     headers: {
@@ -579,20 +425,14 @@ aiSocket.on("message", async (msg) => {
     setTimeout(resolve, 4500);
   });
 
-  await transferCallToHuman();
+  await transferCallToHuman(callSid);
   return;
 }
 
 if (response.type === "conversation.item.input_audio_transcription.completed") {
   const userText = response.transcript || "";
   const normalizedText = userText.toLowerCase();
-
-
-if (shortReplyOnly) {
-  console.log("RÉPONSE COURTE - PAS DE RECHERCHE SHOPIFY");
-  return;
-}
-
+   
   callLog.messages.push({
     role: "user",
     text: userText,
@@ -916,8 +756,8 @@ if (orders.length === 0) {
   ws.on("error", (err) => {
     console.error("Erreur Twilio:", err.message);
   });
-});
 
+});
 
 
 
