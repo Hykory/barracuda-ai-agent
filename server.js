@@ -71,6 +71,7 @@ app.set("views", path.join(__dirname, "views"));
 app.use("/public", express.static("public"));
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 /* =========================
    SHOPIFY (VERSION SIMPLE)
@@ -165,43 +166,43 @@ async function searchShopifyOrders(query) {
 }
 
 
-tools: [
-  {
-    type: "function",
-    name: "search_shopify_products",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-      },
-      required: ["query"],
-    },
-  },
-  {
-    type: "function",
-    name: "search_shopify_orders",
-    parameters: {
-      type: "object",
-      properties: {
-        query: { type: "string" },
-      },
-      required: ["query"],
-    },
-  },
-],
-
 
 /* =========================
    ROUTE TWILIO
 ========================= */
-
 app.post("/voice", (req, res) => {
   const twiml = `
 <Response>
+  <Gather numDigits="1" action="/voice/language" method="POST" timeout="5">
+    <Say language="fr-CA">Pour le français, appuyez sur 1.</Say>
+    <Say language="en-US">For English, press 2.</Say>
+  </Gather>
+  <Redirect method="POST">/voice/language?Digits=1</Redirect>
+</Response>`;
+
+  res.type("text/xml");
+  res.send(twiml);
+});
+
+app.post("/voice/language", (req, res) => {
+  console.log("BODY:", req.body);
+  console.log("QUERY:", req.query);
+
+  const digit = req.body.Digits || req.query.Digits || "1";
+  console.log("CHIFFRE APPUYÉ:", digit);
+
+  const lang = digit === "2" ? "en" : "fr";
+  console.log("LANGUE CHOISIE:", lang);
+
+  const twiml = `
+<Response>
   <Connect>
-    <Stream url="wss://stopping-absurd-nuzzle.ngrok-free.dev/ws" />
+  <Stream url="wss://stopping-absurd-nuzzle.ngrok-free.dev/ws">
+  <Parameter name="language" value="${lang}" />
+</Stream>
   </Connect>
 </Response>`;
+
   res.type("text/xml");
   res.send(twiml);
 });
@@ -258,8 +259,13 @@ const server = app.listen(PORT, () => {
 
 const wss = new WebSocket.Server({ server, path: "/ws" });
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
+
+  let selectedLanguage = "fr";
+  let isFrench = true;
+
   console.log("Twilio connecté");
+  console.log("REQ URL WEBSOCKET:", req.url);
 
   const callId = Date.now().toString();
 
@@ -284,6 +290,38 @@ console.log("Call ID:", callId);
   let isInterrupted = false;
   let currentAiItemId = null;
   let currentAudioDurationMs = 0;
+
+  ws.on("message", (msg) => {
+  const data = JSON.parse(msg);
+
+if (data.event === "start") {
+
+  const languageParam =
+    data.start.customParameters?.language || "fr";
+
+  selectedLanguage = languageParam;
+
+  isFrench = selectedLanguage !== "en";
+
+  streamSid = data.start.streamSid;
+  callSid = data.start.callSid;
+
+  console.log("Appel commencé");
+  console.log("LANGUE PARAM:", languageParam);
+  console.log("IS FRENCH:", isFrench);
+  console.log("Stream SID:", streamSid);
+  console.log("Call SID:", callSid);
+}
+
+  if (data.event === "media") {
+    if (aiSocket.readyState === WebSocket.OPEN) {
+      aiSocket.send(JSON.stringify({
+        type: "input_audio_buffer.append",
+        audio: data.media.payload,
+      }));
+    }
+  }
+});
 
   async function transferCallToHuman() {
   if (!callSid) {
@@ -373,28 +411,23 @@ console.log("Call ID:", callId);
       ],
 
       tool_choice: "auto",
+      
 
       instructions: `
+
+LANGUE FORCÉE : ${isFrench ? "Cette conversation est en FRANÇAIS. Tu dois parler uniquement en français, peu importe ce que dit le client." : "This conversation is in ENGLISH. You must speak English only, no matter what the client says."}
+
 ${systemPrompt}
 // ... reste identique
 
 BASE DE CONNAISSANCE :
 ${knowledgeBase}
 
-RÈGLES IMPORTANTES POUR LA VOIX :
-
 LANGUE :
-- Tu peux parler français et anglais.
-- Choisis la langue principale du client dans les premières secondes de l’appel.
-- Une fois la langue détectée, garde cette langue pour toute la conversation à moins que le client change clairement de langue.
-- Si la conversation commence en français, reste entièrement en français.
-- Si la conversation commence en anglais, reste entièrement en anglais.
-- Ne change pas de langue pour des mots isolés comme "okay", "yeah", "perfect", "thanks".
-- Change de langue seulement si le client parle clairement dans l’autre langue pendant plusieurs phrases.
-- Ne mélange jamais français et anglais dans une même réponse.
-- Le message d’accueil peut être bilingue seulement au début de l’appel.
-- Si le client parle anglais, toutes les informations doivent être données en anglais, incluant l’adresse, les heures d’ouverture, les services et les explications.
-- Ne traduis pas seulement la réponse principale : adapte toute la phrase dans la langue du client.
+- La langue de l’appel est déjà choisie avant le début de la conversation.
+- Tu dois parler uniquement dans cette langue.
+- Ne change jamais de langue pendant l’appel.
+- Ne mélange jamais français et anglais.
 
 STYLE TÉLÉPHONE :
 - Réponds court.
@@ -465,64 +498,29 @@ ADRESSE :
     );
 
     // INTRO CORRECTE
-    setTimeout(() => {
-      aiSocket.send(
-        JSON.stringify({
+
+const waitForStreamSid = setInterval(() => {
+      if (streamSid) {
+        clearInterval(waitForStreamSid);
+
+        const introText = isFrench
+          ? "L'appel commence. Présente-toi avec cette phrase exacte : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
+          : "The call starts. Introduce yourself with this exact phrase: Hi, this is Barry from Barracuda Pools. How can I help you today?";
+
+        aiSocket.send(JSON.stringify({
           type: "conversation.item.create",
           item: {
             type: "message",
             role: "user",
-            content: [
-              {
-                type: "input_text",
-                text:
-                  "L'appel commence. Présente-toi avec cette phrase exacte : Bonjour, ici Barry de Piscine Barracuda. Hi, this is Barry from Barracuda Pools. How can i help you today?",
-              },
-            ],
+            content: [{ type: "input_text", text: introText }],
           },
-        })
-      );
+        }));
 
-      aiSocket.send(JSON.stringify({ type: "response.create" }));
-    }, 500);
-  });
-
-  /* =========================
-     AUDIO TWILIO → OPENAI
-  ========================= */
-
-  ws.on("message", (msg) => {
-    const data = JSON.parse(msg);
-
-if (data.event === "start") {
-  streamSid = data.start.streamSid;
-  callSid = data.start.callSid;
-
-  console.log("Appel commencé");
-  console.log("Call SID:", callSid);
-
-  callLog.events.push({
-    type: "call_started",
-    time: new Date().toISOString(),
-    streamSid: data.start.streamSid,
-    callSid: data.start.callSid,
-  });
-
-  writeCallLog(callId, callLog);
-}
-
-    if (data.event === "media") {
-      if (aiSocket.readyState === WebSocket.OPEN) {
-        aiSocket.send(
-          JSON.stringify({
-            type: "input_audio_buffer.append",
-            audio: data.media.payload,
-          })
-        );
+        aiSocket.send(JSON.stringify({ type: "response.create" }));
       }
-    }
-  });
+    }, 100);
 
+ });
   /* =========================
      AUDIO OPENAI → TWILIO
   ========================= */
@@ -588,9 +586,7 @@ aiSocket.on("message", async (msg) => {
 if (response.type === "conversation.item.input_audio_transcription.completed") {
   const userText = response.transcript || "";
   const normalizedText = userText.toLowerCase();
-  const shortReplyOnly =
-  ["oui", "yes", "ok", "okay", "non", "no", "allo", "hello", "salut", "bonjour", "olá"]
-    .includes(normalizedText.trim());
+
 
 if (shortReplyOnly) {
   console.log("RÉPONSE COURTE - PAS DE RECHERCHE SHOPIFY");
@@ -695,7 +691,9 @@ if (response.type === "response.audio_transcript.done") {
     writeCallLog(callId, callLog);
   }
 
-  if (response.type === "response.audio.delta" && streamSid) {
+  if (response.type === "response.audio.delta") {
+    console.log("AUDIO DELTA - streamSid:", streamSid);
+    if (!streamSid) return;
     if (isInterrupted) {
       return;
     }
@@ -919,3 +917,7 @@ if (orders.length === 0) {
     console.error("Erreur Twilio:", err.message);
   });
 });
+
+
+
+
