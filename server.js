@@ -264,7 +264,7 @@ if (data.event === "start") {
 LANGUE FORCÉE : ${isFrench ? "Cette conversation est en FRANÇAIS. Tu dois parler uniquement en français, peu importe ce que dit le client." : "This conversation is in ENGLISH. You must speak English only, no matter what the client says."}
 
 ${systemPrompt}
-// ... reste identique
+
 
 BASE DE CONNAISSANCE :
 ${knowledgeBase}

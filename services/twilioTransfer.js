@@ -1,4 +1,3 @@
-const { DestinationAlphaSenderPage } = require("twilio/lib/rest/messaging/v1/service/destinationAlphaSender");
 
 function createTransferService(twilioClient, humanPhoneNumber) {
   return async function transferCallToHuman(callSid) {
