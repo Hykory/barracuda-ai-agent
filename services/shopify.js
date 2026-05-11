@@ -52,8 +52,6 @@ async function searchShopifyOrders(query) {
               edges {
                 node {
                   name
-                  email
-                  phone
                   displayFulfillmentStatus
                   displayFinancialStatus
                   createdAt
@@ -70,16 +68,12 @@ async function searchShopifyOrders(query) {
                       url
                     }
                   }
-                  customer {
-                    firstName
-                    lastName
-                  }
                 }
               }
             }
           }
         `,
-        variables: { query },
+        variables: { query: `name:${query}` },
       }),
     }
   );
@@ -87,4 +81,7 @@ async function searchShopifyOrders(query) {
   return await response.json();
 }
 
-module.exports = { searchShopifyProducts, searchShopifyOrders };
+module.exports = {
+  searchShopifyProducts,
+  searchShopifyOrders,
+};
