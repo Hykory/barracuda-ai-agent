@@ -22,7 +22,7 @@ router.post("/voice/language", (req, res) => {
   const twiml = `
 <Response>
   <Connect>
-    <Stream url="wss://stopping-absurd-nuzzle.ngrok-free.dev/ws">
+    <Stream url="wss://barracuda-ai-agent-production.up.railway.app/ws">
       <Parameter name="language" value="${lang}" />
     </Stream>
   </Connect>
