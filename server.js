@@ -111,8 +111,8 @@ app.get("/dashboard", dashboardAuth, (req, res) => {
   }
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`Serveur lancé sur http://localhost:${PORT}`);
+const server = app.listen(PORT, "0.0.0.0", () => { 
+  console.log(`Serveur lancé sur le port ${PORT}`);
 });
 
 app.use("/", voiceRoutes);    
