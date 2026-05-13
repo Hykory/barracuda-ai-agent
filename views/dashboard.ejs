@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Barry AI — Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0a0c10;
+      --surface:  #111318;
+      --border:   #1e2230;
+      --accent:   #00e5ff;
+      --accent2:  #ff4d6d;
+      --text:     #e8eaf0;
+      --muted:    #5a607a;
+      --green:    #00e096;
+      --yellow:   #ffd166;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      min-height: 100vh;
+      padding: 0;
+    }
+
+    /* ── HEADER ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 28px 48px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 10;
+    }
+
+    .logo {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+
+    .logo span { color: var(--accent); }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #0d1f1a;
+      border: 1px solid #00e09640;
+      color: var(--green);
+      font-size: 11px;
+      padding: 6px 14px;
+      border-radius: 99px;
+      letter-spacing: 0.05em;
+    }
+
+    .status-pill::before {
+      content: '';
+      width: 7px; height: 7px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ── MAIN ── */
+    main {
+      max-width: 1300px;
+      margin: 0 auto;
+      padding: 48px 48px 80px;
+    }
+
+    .section-label {
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    /* ── KPI GRID ── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 48px;
+    }
+
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px 32px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+
+    .kpi-card:hover { border-color: var(--accent); }
+
+    .kpi-card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, var(--accent-glow, transparent) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    .kpi-card:nth-child(1) { --accent-glow: #00e5ff08; }
+    .kpi-card:nth-child(2) { --accent-glow: #ff4d6d08; }
+    .kpi-card:nth-child(3) { --accent-glow: #00e09608; }
+
+    .kpi-label {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    .kpi-value {
+      font-family: 'Syne', sans-serif;
+      font-size: 48px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -2px;
+    }
+
+    .kpi-card:nth-child(1) .kpi-value { color: var(--accent); }
+    .kpi-card:nth-child(2) .kpi-value { color: var(--accent2); }
+    .kpi-card:nth-child(3) .kpi-value { color: var(--green); }
+
+    .kpi-sub {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    /* ── CHARTS ROW ── */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 48px;
+    }
+
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px 32px;
+    }
+
+    .chart-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 24px;
+      color: var(--text);
+    }
+
+    .chart-wrap {
+      position: relative;
+      height: 220px;
+    }
+
+    /* ── CALLS TABLE ── */
+    .table-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .table-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 32px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .table-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .badge {
+      background: var(--border);
+      color: var(--muted);
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 99px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    thead th {
+      padding: 14px 20px;
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      background: #0d0f14;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+      cursor: pointer;
+    }
+
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #ffffff05; }
+
+    tbody td {
+      padding: 16px 20px;
+      font-size: 12px;
+      color: var(--text);
+      vertical-align: middle;
+    }
+
+    .td-id {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: 'DM Mono', monospace;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      letter-spacing: 0.05em;
+      padding: 4px 10px;
+      border-radius: 99px;
+      font-weight: 500;
+    }
+
+    .pill-transfer {
+      background: #ff4d6d18;
+      color: var(--accent2);
+      border: 1px solid #ff4d6d30;
+    }
+
+    .pill-normal {
+      background: #00e09618;
+      color: var(--green);
+      border: 1px solid #00e09630;
+    }
+
+    .pill::before {
+      content: '';
+      width: 5px; height: 5px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .messages-preview {
+      max-width: 300px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    /* ── EMPTY ── */
+    .empty-state {
+      text-align: center;
+      padding: 80px 32px;
+      color: var(--muted);
+    }
+
+    .empty-state .icon {
+      font-size: 40px;
+      margin-bottom: 16px;
+      opacity: 0.4;
+    }
+
+    .empty-state p {
+      font-size: 13px;
+    }
+
+    /* ── DETAIL MODAL ── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #000000cc;
+      z-index: 100;
+      backdrop-filter: blur(4px);
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.active { display: flex; }
+
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 640px;
+      max-width: 95vw;
+      max-height: 80vh;
+      overflow-y: auto;
+      padding: 36px;
+    }
+
+    .modal-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 28px;
+    }
+
+    .modal-title {
+      font-family: 'Syne', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .modal-close {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .modal-close:hover { border-color: var(--accent2); color: var(--accent2); }
+
+    .modal-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .meta-item {
+      background: #0d0f14;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+
+    .meta-item .label {
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .meta-item .value {
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .messages-log {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .msg {
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 12px;
+      line-height: 1.6;
+      max-width: 90%;
+    }
+
+    .msg-user {
+      background: #00e5ff12;
+      border: 1px solid #00e5ff25;
+      color: var(--accent);
+      align-self: flex-start;
+    }
+
+    .msg-assistant {
+      background: #ffffff08;
+      border: 1px solid var(--border);
+      color: var(--text);
+      align-self: flex-end;
+    }
+
+    .msg-role {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      opacity: 0.5;
+      margin-bottom: 4px;
+    }
+
+    @media (max-width: 900px) {
+      header, main { padding-left: 20px; padding-right: 20px; }
+      .kpi-grid { grid-template-columns: 1fr 1fr; }
+      .charts-row { grid-template-columns: 1fr; }
+      .modal-meta { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 600px) {
+      .kpi-grid { grid-template-columns: 1fr; }
+      .kpi-value { font-size: 36px; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Barry<span>.</span>AI</div>
+  <div class="status-pill">LIVE</div>
+</header>
+
+<main>
+
+  <!-- KPIs -->
+  <div class="section-label">Aperçu général</div>
+  <div class="kpi-grid">
+    <div class="kpi-card">
+      <div class="kpi-label">Total appels</div>
+      <div class="kpi-value"><%- totalCalls %></div>
+      <div class="kpi-sub">depuis le début</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Transferts humain</div>
+      <div class="kpi-value"><%- transferredCalls %></div>
+      <div class="kpi-sub">
+        <%- totalCalls > 0 ? Math.round((transferredCalls / totalCalls) * 100) : 0 %>% des appels
+      </div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">Durée moyenne</div>
+      <div class="kpi-value"><%- Math.round(avgDuration) %>s</div>
+      <div class="kpi-sub">par appel</div>
+    </div>
+  </div>
+
+  <!-- CHARTS -->
+  <div class="section-label">Visualisation</div>
+  <div class="charts-row">
+    <div class="chart-card">
+      <div class="chart-title">Appels vs Transferts</div>
+      <div class="chart-wrap">
+        <canvas id="callsChart"></canvas>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Durée des appels (sec)</div>
+      <div class="chart-wrap">
+        <canvas id="durationChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABLE -->
+  <div class="section-label">Historique des appels</div>
+  <div class="table-card">
+    <div class="table-header">
+      <div class="table-title">Journal</div>
+      <div class="badge"><%- logs.length %> entrées</div>
+    </div>
+
+    <% if (logs.length === 0) { %>
+    <div class="empty-state">
+      <div class="icon">📭</div>
+      <p>Aucun appel enregistré pour l'instant.</p>
+    </div>
+    <% } else { %>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Début</th>
+          <th>Durée</th>
+          <th>Messages</th>
+          <th>Statut</th>
+          <th>Aperçu</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% logs.forEach(function(log) {
+          const wasTransferred = log.events && log.events.some(e => e.type === 'transfer_requested');
+          const firstUserMsg = log.messages && log.messages.find(m => m.role === 'user');
+          const date = new Date(log.startedAt).toLocaleString('fr-CA');
+        %>
+        <tr onclick="openModal(<%- JSON.stringify(log).replace(/</g, '\\u003c') %>)">
+          <td class="td-id"><%- log.callId %></td>
+          <td><%- date %></td>
+          <td><%- log.durationSeconds != null ? log.durationSeconds + 's' : '—' %></td>
+          <td><%- (log.messages || []).length %></td>
+          <td>
+            <% if (wasTransferred) { %>
+              <span class="pill pill-transfer">Transféré</span>
+            <% } else { %>
+              <span class="pill pill-normal">Complété</span>
+            <% } %>
+          </td>
+          <td>
+            <div class="messages-preview">
+              <%- firstUserMsg ? firstUserMsg.text : '—' %>
+            </div>
+          </td>
+        </tr>
+        <% }); %>
+      </tbody>
+    </table>
+    <% } %>
+  </div>
+
+</main>
+
+<!-- MODAL DÉTAIL -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModalOutside(event)">
+  <div class="modal" id="modalContent">
+    <div class="modal-top">
+      <div class="modal-title" id="modalTitle">Détail de l'appel</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-meta" id="modalMeta"></div>
+    <div class="section-label" style="margin-bottom:14px;">Conversation</div>
+    <div class="messages-log" id="modalMessages"></div>
+  </div>
+</div>
+
+<script>
+  /* ── DATA ── */
+  const totalCalls       = <%- JSON.stringify(totalCalls) %>;
+  const transferredCalls = <%- JSON.stringify(transferredCalls) %>;
+  const avgDuration      = <%- JSON.stringify(avgDuration) %>;
+  const logs             = <%- JSON.stringify(logs) %>;
+
+  /* ── CHART DEFAULTS ── */
+  Chart.defaults.color = '#5a607a';
+  Chart.defaults.font.family = "'DM Mono', monospace";
+  Chart.defaults.font.size = 11;
+
+  /* ── BAR CHART ── */
+  new Chart(document.getElementById('callsChart'), {
+    type: 'bar',
+    data: {
+      labels: ['Total appels', 'Transferts'],
+      datasets: [{
+        data: [totalCalls, transferredCalls],
+        backgroundColor: ['#00e5ff20', '#ff4d6d20'],
+        borderColor: ['#00e5ff', '#ff4d6d'],
+        borderWidth: 2,
+        borderRadius: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#1e2230' }, ticks: { color: '#5a607a' } },
+        y: { grid: { color: '#1e2230' }, ticks: { color: '#5a607a', stepSize: 1 }, beginAtZero: true }
+      }
+    }
+  });
+
+  /* ── DURATION LINE CHART ── */
+  const durations = logs.map(l => l.durationSeconds || 0);
+  const durationLabels = logs.map((l, i) => '#' + (i + 1));
+
+  new Chart(document.getElementById('durationChart'), {
+    type: 'line',
+    data: {
+      labels: durationLabels,
+      datasets: [{
+        data: durations,
+        borderColor: '#00e096',
+        backgroundColor: '#00e09615',
+        borderWidth: 2,
+        pointBackgroundColor: '#00e096',
+        pointRadius: 4,
+        tension: 0.4,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: '#1e2230' }, ticks: { color: '#5a607a' } },
+        y: { grid: { color: '#1e2230' }, ticks: { color: '#5a607a' }, beginAtZero: true }
+      }
+    }
+  });
+
+  /* ── MODAL ── */
+  function openModal(log) {
+    const wasTransferred = log.events && log.events.some(e => e.type === 'transfer_requested');
+    const date = new Date(log.startedAt).toLocaleString('fr-CA');
+
+    document.getElementById('modalTitle').textContent = 'Appel — ' + log.callId;
+
+    document.getElementById('modalMeta').innerHTML = `
+      <div class="meta-item"><div class="label">Début</div><div class="value">${date}</div></div>
+      <div class="meta-item"><div class="label">Durée</div><div class="value">${log.durationSeconds != null ? log.durationSeconds + 's' : '—'}</div></div>
+      <div class="meta-item"><div class="label">Messages</div><div class="value">${(log.messages || []).length}</div></div>
+      <div class="meta-item"><div class="label">Statut</div><div class="value">${wasTransferred ? '🔴 Transféré' : '🟢 Complété'}</div></div>
+    `;
+
+    const msgs = log.messages || [];
+    document.getElementById('modalMessages').innerHTML = msgs.length === 0
+      ? '<p style="color:var(--muted);font-size:12px;">Aucun message enregistré.</p>'
+      : msgs.map(m => `
+          <div class="msg msg-${m.role}">
+            <div class="msg-role">${m.role === 'user' ? 'Client' : 'Barry'}</div>
+            ${escapeHtml(m.text || '')}
+          </div>
+        `).join('');
+
+    document.getElementById('modalOverlay').classList.add('active');
+  }
+
+  function closeModal() {
+    document.getElementById('modalOverlay').classList.remove('active');
+  }
+
+  function closeModalOutside(e) {
+    if (e.target === document.getElementById('modalOverlay')) closeModal();
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>
