@@ -111,6 +111,10 @@ app.get("/dashboard", dashboardAuth, (req, res) => {
   }
 });
 
+app.get("/", (req, res) => {
+  res.send("Piscine Barracuda AI is online 🚀");
+});
+
 const server = app.listen(PORT, "0.0.0.0", () => { 
   console.log(`Serveur lancé sur le port ${PORT}`);
 });
