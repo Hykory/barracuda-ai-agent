@@ -362,7 +362,7 @@ ADRESSE :
         type: "conversation.item.create",
         item: {
           type: "message",
-          role: "user",
+          role: "system",
           content: [{ type: "input_text", text: introText }],
         },
       }));
