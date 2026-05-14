@@ -29,7 +29,6 @@
       padding: 0;
     }
 
-    /* ── HEADER ── */
     header {
       display: flex;
       align-items: center;
@@ -77,7 +76,6 @@
       50% { opacity: 0.3; }
     }
 
-    /* ── MAIN ── */
     main {
       max-width: 1300px;
       margin: 0 auto;
@@ -92,7 +90,6 @@
       margin-bottom: 20px;
     }
 
-    /* ── KPI GRID ── */
     .kpi-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
@@ -150,7 +147,6 @@
       margin-top: 8px;
     }
 
-    /* ── CHARTS ROW ── */
     .charts-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -178,7 +174,6 @@
       height: 220px;
     }
 
-    /* ── CALLS TABLE ── */
     .table-card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -231,7 +226,7 @@
     }
 
     tbody tr:last-child { border-bottom: none; }
-    tbody tr:hover { background: #ffffff05; }
+    tbody tr:hover { background: #ffffff08; }
 
     tbody td {
       padding: 16px 20px;
@@ -285,7 +280,6 @@
       font-size: 11px;
     }
 
-    /* ── EMPTY ── */
     .empty-state {
       text-align: center;
       padding: 80px 32px;
@@ -298,11 +292,9 @@
       opacity: 0.4;
     }
 
-    .empty-state p {
-      font-size: 13px;
-    }
+    .empty-state p { font-size: 13px; }
 
-    /* ── DETAIL MODAL ── */
+    /* ── MODAL ── */
     .modal-overlay {
       display: none;
       position: fixed;
@@ -320,9 +312,9 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 16px;
-      width: 640px;
+      width: 660px;
       max-width: 95vw;
-      max-height: 80vh;
+      max-height: 85vh;
       overflow-y: auto;
       padding: 36px;
     }
@@ -376,10 +368,7 @@
       margin-bottom: 6px;
     }
 
-    .meta-item .value {
-      font-size: 13px;
-      color: var(--text);
-    }
+    .meta-item .value { font-size: 13px; color: var(--text); }
 
     .messages-log {
       display: flex;
@@ -392,7 +381,7 @@
       border-radius: 10px;
       font-size: 12px;
       line-height: 1.6;
-      max-width: 90%;
+      max-width: 85%;
     }
 
     .msg-user {
@@ -450,9 +439,7 @@
     <div class="kpi-card">
       <div class="kpi-label">Transferts humain</div>
       <div class="kpi-value"><%- transferredCalls %></div>
-      <div class="kpi-sub">
-        <%- totalCalls > 0 ? Math.round((transferredCalls / totalCalls) * 100) : 0 %>% des appels
-      </div>
+      <div class="kpi-sub"><%- totalCalls > 0 ? Math.round((transferredCalls / totalCalls) * 100) : 0 %>% des appels</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-label">Durée moyenne</div>
@@ -466,15 +453,11 @@
   <div class="charts-row">
     <div class="chart-card">
       <div class="chart-title">Appels vs Transferts</div>
-      <div class="chart-wrap">
-        <canvas id="callsChart"></canvas>
-      </div>
+      <div class="chart-wrap"><canvas id="callsChart"></canvas></div>
     </div>
     <div class="chart-card">
       <div class="chart-title">Durée des appels (sec)</div>
-      <div class="chart-wrap">
-        <canvas id="durationChart"></canvas>
-      </div>
+      <div class="chart-wrap"><canvas id="durationChart"></canvas></div>
     </div>
   </div>
 
@@ -503,39 +486,14 @@
           <th>Aperçu</th>
         </tr>
       </thead>
-      <tbody>
-        <% logs.forEach(function(log) {
-          const wasTransferred = log.events && log.events.some(e => e.type === 'transfer_requested');
-          const firstUserMsg = log.messages && log.messages.find(m => m.role === 'user');
-          const date = new Date(log.startedAt).toLocaleString('fr-CA');
-        %>
-        <tr onclick="openModal(<%- JSON.stringify(log).replace(/</g, '\\u003c') %>)">
-          <td class="td-id"><%- log.callId %></td>
-          <td><%- date %></td>
-          <td><%- log.durationSeconds != null ? log.durationSeconds + 's' : '—' %></td>
-          <td><%- (log.messages || []).length %></td>
-          <td>
-            <% if (wasTransferred) { %>
-              <span class="pill pill-transfer">Transféré</span>
-            <% } else { %>
-              <span class="pill pill-normal">Complété</span>
-            <% } %>
-          </td>
-          <td>
-            <div class="messages-preview">
-              <%- firstUserMsg ? firstUserMsg.text : '—' %>
-            </div>
-          </td>
-        </tr>
-        <% }); %>
-      </tbody>
+      <tbody id="callsTableBody"></tbody>
     </table>
     <% } %>
   </div>
 
 </main>
 
-<!-- MODAL DÉTAIL -->
+<!-- MODAL -->
 <div class="modal-overlay" id="modalOverlay" onclick="closeModalOutside(event)">
   <div class="modal" id="modalContent">
     <div class="modal-top">
@@ -549,18 +507,47 @@
 </div>
 
 <script>
-  /* ── DATA ── */
+  /* ── DATA injectée depuis EJS ── */
   const totalCalls       = <%- JSON.stringify(totalCalls) %>;
   const transferredCalls = <%- JSON.stringify(transferredCalls) %>;
   const avgDuration      = <%- JSON.stringify(avgDuration) %>;
   const logs             = <%- JSON.stringify(logs) %>;
 
-  /* ── CHART DEFAULTS ── */
+  /* ── REMPLIR LE TABLEAU EN JS (évite les bugs d'échappement EJS) ── */
+  const tbody = document.getElementById('callsTableBody');
+  if (tbody) {
+    logs.forEach((log, i) => {
+      const wasTransferred = log.events?.some(e => e.type === 'transfer_requested');
+      const date = new Date(log.startedAt).toLocaleString('fr-CA');
+      const firstMsg = log.messages?.find(m => m.role === 'user');
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="td-id">${escapeHtml(String(log.callId))}</td>
+        <td>${date}</td>
+        <td>${log.durationSeconds != null ? log.durationSeconds + 's' : '—'}</td>
+        <td>${(log.messages || []).length}</td>
+        <td>
+          <span class="pill ${wasTransferred ? 'pill-transfer' : 'pill-normal'}">
+            ${wasTransferred ? 'Transféré' : 'Complété'}
+          </span>
+        </td>
+        <td>
+          <div class="messages-preview">
+            ${firstMsg ? escapeHtml(firstMsg.text || '') : '—'}
+          </div>
+        </td>
+      `;
+      tr.addEventListener('click', () => openModal(log));
+      tbody.appendChild(tr);
+    });
+  }
+
+  /* ── CHARTS ── */
   Chart.defaults.color = '#5a607a';
   Chart.defaults.font.family = "'DM Mono', monospace";
   Chart.defaults.font.size = 11;
 
-  /* ── BAR CHART ── */
   new Chart(document.getElementById('callsChart'), {
     type: 'bar',
     data: {
@@ -584,7 +571,6 @@
     }
   });
 
-  /* ── DURATION LINE CHART ── */
   const durations = logs.map(l => l.durationSeconds || 0);
   const durationLabels = logs.map((l, i) => '#' + (i + 1));
 
@@ -616,16 +602,28 @@
 
   /* ── MODAL ── */
   function openModal(log) {
-    const wasTransferred = log.events && log.events.some(e => e.type === 'transfer_requested');
+    const wasTransferred = log.events?.some(e => e.type === 'transfer_requested');
     const date = new Date(log.startedAt).toLocaleString('fr-CA');
 
     document.getElementById('modalTitle').textContent = 'Appel — ' + log.callId;
 
     document.getElementById('modalMeta').innerHTML = `
-      <div class="meta-item"><div class="label">Début</div><div class="value">${date}</div></div>
-      <div class="meta-item"><div class="label">Durée</div><div class="value">${log.durationSeconds != null ? log.durationSeconds + 's' : '—'}</div></div>
-      <div class="meta-item"><div class="label">Messages</div><div class="value">${(log.messages || []).length}</div></div>
-      <div class="meta-item"><div class="label">Statut</div><div class="value">${wasTransferred ? '🔴 Transféré' : '🟢 Complété'}</div></div>
+      <div class="meta-item">
+        <div class="label">Début</div>
+        <div class="value">${date}</div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Durée</div>
+        <div class="value">${log.durationSeconds != null ? log.durationSeconds + 's' : '—'}</div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Messages</div>
+        <div class="value">${(log.messages || []).length}</div>
+      </div>
+      <div class="meta-item">
+        <div class="label">Statut</div>
+        <div class="value">${wasTransferred ? '🔴 Transféré' : '🟢 Complété'}</div>
+      </div>
     `;
 
     const msgs = log.messages || [];
@@ -650,8 +648,14 @@
   }
 
   function escapeHtml(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 </script>
 </body>
 </html>
+
+//aaaa
