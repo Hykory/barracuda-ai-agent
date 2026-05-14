@@ -73,7 +73,7 @@ async function searchShopifyOrders(query) {
             }
           }
         `,
-        variables: { query: `name:${query}` },
+        variables: { query: `name:${query}` }
       }),
     }
   );
