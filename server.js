@@ -209,6 +209,7 @@ wss.on("connection", (ws, req) => {
       aiSocket.send(JSON.stringify({
         type: "session.update",
         session: {
+          type: "session update",
           modalities: ["text", "audio"],
           voice: "ash",
           input_audio_format: "g711_ulaw",
@@ -379,7 +380,6 @@ ADRESSE :
      aiSocket.send(JSON.stringify({
   type: "response.create",
   response: {
-    modalities: ["audio", "text"],
     instructions: isFrench
       ? "Dis uniquement cette phrase une seule fois : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
       : "Say only this sentence once: Hi, this is Barry from Barracuda Pools. How can I help you today?"
@@ -593,7 +593,7 @@ if (response.type === "response.audio.delta") {
 aiSocket.send(JSON.stringify({
   type: "response.create",
   response: {
-    modalities: ["audio", "text"],
+    
     instructions: `
 Réponds maintenant au client avec les informations de la commande.
 Sois court et naturel.
