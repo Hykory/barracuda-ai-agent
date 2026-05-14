@@ -6,6 +6,7 @@ const cookieParser = require("cookie-parser");
 const WebSocket = require("ws");
 const fs = require("fs");
 const path = require("path");
+const smsRoutes = require("./routes/sms");
 const voiceRoutes = require("./routes/voice");
 const { writeCallLog } = require("./services/logs");
 const {
@@ -115,11 +116,13 @@ app.get("/", (req, res) => {
   res.send("Piscine Barracuda AI is online 🚀");
 });
 
+app.use("/", voiceRoutes);    
+app.use("/", smsRoutes(knowledgeBase));
+
 const server = app.listen(PORT, "0.0.0.0", () => { 
   console.log(`Serveur lancé sur le port ${PORT}`);
 });
 
-app.use("/", voiceRoutes);    
 /* =========================
    WEBSOCKET TWILIO
 ========================= */
