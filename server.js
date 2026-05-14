@@ -269,6 +269,12 @@ LANGUE :
 - Ne change jamais de langue pendant l'appel.
 - Ne mélange jamais français et anglais.
 
+INTRODUCTION :
+- Dis la phrase d’introduction seulement au tout début de l’appel ou de la converstation sms.
+- Ne répète jamais la phrase d’introduction après.
+- Si tu ne comprends pas le client, dis plutôt : "Désolé, je n’ai pas bien compris. Pouvez-vous répéter ?"
+- Ne recommence jamais avec "Bonjour, ici Barry..." pour gérer une incompréhension.
+
 STYLE TÉLÉPHONE :
 - Réponds court.
 - Parle naturellement comme un humain.
@@ -357,20 +363,15 @@ ADRESSE :
       }));
 
       // ✅ streamSid et isFrench sont garantis corrects ici
-      const introText = isFrench
-        ? "L'appel commence. Présente-toi avec cette phrase exacte : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
-        : "The call starts. Introduce yourself with this exact phrase: Hi, this is Barry from Barracuda Pools. How can I help you today?";
-
-      aiSocket.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "system",
-          content: [{ type: "input_text", text: introText }],
-        },
-      }));
-
-      aiSocket.send(JSON.stringify({ type: "response.create" }));
+     aiSocket.send(JSON.stringify({
+  type: "response.create",
+  response: {
+    modalities: ["audio", "text"],
+    instructions: isFrench
+      ? "Dis uniquement cette phrase une seule fois : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
+      : "Say only this sentence once: Hi, this is Barry from Barracuda Pools. How can I help you today?"
+  }
+}));
     });
 
     /* =========================
