@@ -525,11 +525,12 @@ ADRESSE :
         const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
         currentAudioDurationMs += payloadBytes / 8;
 
-        ws.send(JSON.stringify({
-          event: "media",
-          streamSid,
-          media: { payload: response.delta },
-        }));
+      const g711Buffer = Buffer.from(response.delta, "base64"); 
+ws.send(JSON.stringify({
+  event: "media",
+  streamSid,
+  media: { payload: g711Buffer.toString("base64") },
+}));
       }
 
       if (response.type === "response.function_call_arguments.done") {
