@@ -47,8 +47,7 @@ function loadKnowledgeFolder(folderPath) {
 }
 
 const knowledgeBase = loadKnowledgeFolder("./knowledge");
-
-const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime";
+const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
