@@ -203,6 +203,7 @@ wss.on("connection", (ws, req) => {
     });
 
     aiSocket.on("open", () => {
+      console.log("✅ OpenAI connecté, isFrench:", isFrench, "streamSid:", streamSid);
       console.log("OpenAI connecté");
 
       aiSocket.send(JSON.stringify({
@@ -238,6 +239,16 @@ wss.on("connection", (ws, req) => {
                 required: ["query"],
               },
             },
+            {
+  type: "function",
+  name: "transfer_call_to_human",
+  description: "Transfère l'appel à un humain de l'équipe.",
+  parameters: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
+},
             {
               type: "function",
               name: "search_shopify_orders",
@@ -518,24 +529,20 @@ ADRESSE :
         writeCallLog(callId, callLog);
       }
 
-      if (response.type === "response.audio.delta") {
-        if (!streamSid) return;
-
-        const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
-        currentAudioDurationMs += payloadBytes / 8;
-
-    if (response.type === "response.audio.delta") {
+if (response.type === "response.audio.delta") {
   if (!streamSid) return;
 
-  // response.delta est déjà base64 g711_ulaw si output_audio_format est correct
+  const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
+  currentAudioDurationMs += payloadBytes / 8;
+
   ws.send(JSON.stringify({
     event: "media",
     streamSid,
-    media: { payload: response.delta }, // ne pas re-encoder, juste envoyer
+    media: { payload: response.delta },
   }));
 }
 
-      }
+      
 
       if (response.type === "response.function_call_arguments.done") {
         console.log("FUNCTION CALL:", response.name, response.call_id, response.arguments);
