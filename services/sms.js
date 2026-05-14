@@ -11,6 +11,8 @@ async function generateSmsReply(
   isFirstMessage
 ) {
     if (isFirstMessage) {
+          console.log("TEST generateSmsReply CALLED");
+  console.log("isFirstMessage:", isFirstMessage);
   return "Bonjour, ici Barry de chez Piscine Barracuda. Comment puis-je vous aider ?";
 }
 
