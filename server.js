@@ -525,12 +525,17 @@ ADRESSE :
         const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
         currentAudioDurationMs += payloadBytes / 8;
 
-      const g711Buffer = Buffer.from(response.delta, "base64"); 
-ws.send(JSON.stringify({
-  event: "media",
-  streamSid,
-  media: { payload: g711Buffer.toString("base64") },
-}));
+    if (response.type === "response.audio.delta") {
+  if (!streamSid) return;
+
+  // response.delta est déjà base64 g711_ulaw si output_audio_format est correct
+  ws.send(JSON.stringify({
+    event: "media",
+    streamSid,
+    media: { payload: response.delta }, // ne pas re-encoder, juste envoyer
+  }));
+}
+
       }
 
       if (response.type === "response.function_call_arguments.done") {
