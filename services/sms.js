@@ -10,6 +10,9 @@ async function generateSmsReply(
   mediaUrl,
   isFirstMessage
 ) {
+    if (isFirstMessage) {
+  return "Bonjour, ici Barry de chez Piscine Barracuda. Comment puis-je vous aider ?";
+}
 
   const input = [];
 
