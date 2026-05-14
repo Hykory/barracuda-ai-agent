@@ -207,7 +207,6 @@ wss.on("connection", (ws, req) => {
       console.log("OpenAI connecté");
 
       aiSocket.send(JSON.stringify({
-        type: "session.update",
         session: {
           type: "session update",
           modalities: ["text", "audio"],
@@ -509,12 +508,12 @@ ADRESSE :
         }
       }
 
-      if (response.type === "response.audio_transcript.delta") {
+      if (response.type === "response.output_audio_transcript.delta") {
         if (!callLog.currentAssistantText) callLog.currentAssistantText = "";
         callLog.currentAssistantText += response.delta || "";
       }
 
-      if (response.type === "response.audio_transcript.done") {
+      if (response.type === "response.output_audio_transcript.done") {
         const finalText =
           response.transcript ||
           response.text ||
@@ -532,7 +531,7 @@ ADRESSE :
         writeCallLog(callId, callLog);
       }
 
-if (response.type === "response.audio.delta") {
+if (response.type === "response.output_audio.delta") {
   if (!streamSid) return;
 
   const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
