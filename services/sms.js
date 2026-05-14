@@ -4,26 +4,70 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-async function generateSmsReply(message, knowledgeBase) {
+async function generateSmsReply(
+  message,
+  knowledgeBase,
+  mediaUrl,
+  isFirstMessage
+) {
 
-  const response = await openai.responses.create({
-    model: "gpt-4.1-mini",
+  const input = [];
 
-    input: `
+  input.push({
+    role: "system",
+    content: [
+      {
+        type: "input_text",
+        text: `
 Tu es Barry de Piscine Barracuda.
 
-Ton premier message sera toujours : Salut, c’est Barry de Piscine Barracuda. Comment puis-je vous aider aujourd’hui ?
+${
+  isFirstMessage
+    ? "Presente-toi UNE SEULE FOIS au debut de la conversation."
+    : "Ne te presente jamais de nouveau. Reponds directement."
+}
 
-Tu réponds par SMS.
-Réponds court et naturel.
-Maximum 2 phrases.
+STYLE SMS :
+- Reponses courtes
+- Naturel
+- Maximum 2 phrases
+- Ton humain et amical
+- Pas de longs paragraphes
 
 BASE DE CONNAISSANCE :
 ${knowledgeBase}
-
-Client:
-${message}
 `
+      }
+    ]
+  });
+
+  if (message) {
+    input.push({
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: message,
+        }
+      ]
+    });
+  }
+
+  if (mediaUrl) {
+    input.push({
+      role: "user",
+      content: [
+        {
+          type: "input_image",
+          image_url: mediaUrl,
+        }
+      ]
+    });
+  }
+
+  const response = await openai.responses.create({
+    model: "gpt-4.1-mini",
+    input,
   });
 
   return response.output_text;
