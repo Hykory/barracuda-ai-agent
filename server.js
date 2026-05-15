@@ -195,7 +195,7 @@ wss.on("connection", (ws, req) => {
   ========================= */
 
   function initOpenAI() {
-const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
+const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime";
 
 aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
   headers: {
@@ -207,24 +207,30 @@ aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
       console.log("✅ OpenAI connecté, isFrench:", isFrench, "streamSid:", streamSid);
       console.log("OpenAI connecté");
 
-   
 aiSocket.send(JSON.stringify({
   type: "session.update",
   session: {
-     type: "realtime",
-          voice: "ash",
-          input_audio_format: "g711_ulaw",
-          output_audio_format: "g711_ulaw",
-          input_audio_transcription: {model: "whisper-1"},
-          turn_detection: {
-            type: "server_vad",
-            threshold: 0.7,
-            prefix_padding_ms: 500,
-            silence_duration_ms: 1200,
-            create_response: true,
-          },
-
-          tools: [
+    type: "realtime",
+    model: "gpt-realtime",
+    output_modalities: ["audio"],
+    audio: {
+      input: {
+        format: { type: "audio/pcmu" },
+        turn_detection: {
+          type: "server_vad",
+          threshold: 0.7,
+          prefix_padding_ms: 500,
+          silence_duration_ms: 1200,
+          create_response: true,
+        },
+      },
+      output: {
+        format: { type: "audio/pcmu" },
+        voice: "ash",
+      },
+    },
+    input_audio_transcription: { model: "whisper-1" },
+    tools: [
             {
               type: "function",
               name: "search_shopify_products",
@@ -374,7 +380,7 @@ ADRESSE :
      aiSocket.send(JSON.stringify({
   type: "response.create",
   response: {
-        modalities: ["text", "audio"], 
+        
     instructions: isFrench
       ? "Dis uniquement cette phrase une seule fois : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
       : "Say only this sentence once: Hi, this is Barry from Barracuda Pools. How can I help you today?"
