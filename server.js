@@ -211,6 +211,7 @@ aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
 aiSocket.send(JSON.stringify({
   type: "session.update",
   session: {
+<<<<<<< HEAD
     type: "realtime",
     model: "gpt-realtime",
     output_modalities: ["audio"],
@@ -231,6 +232,23 @@ aiSocket.send(JSON.stringify({
       },
     },
     tools: [
+=======
+     type: "realtime",
+    modalities: ["text", "audio"],
+          voice: "ash",
+          input_audio_format: "g711_ulaw",
+          output_audio_format: "g711_ulaw",
+          input_audio_transcription: {model: "whisper-1"},
+          turn_detection: {
+            type: "server_vad",
+            threshold: 0.7,
+            prefix_padding_ms: 500,
+            silence_duration_ms: 1200,
+            create_response: true,
+          },
+
+          tools: [
+>>>>>>> parent of 572421b (voice14)
             {
               type: "function",
               name: "search_shopify_products",
@@ -380,7 +398,10 @@ ADRESSE :
      aiSocket.send(JSON.stringify({
   type: "response.create",
   response: {
+<<<<<<< HEAD
         
+=======
+>>>>>>> parent of 572421b (voice14)
     instructions: isFrench
       ? "Dis uniquement cette phrase une seule fois : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
       : "Say only this sentence once: Hi, this is Barry from Barracuda Pools. How can I help you today?"
