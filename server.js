@@ -206,10 +206,11 @@ wss.on("connection", (ws, req) => {
       console.log("✅ OpenAI connecté, isFrench:", isFrench, "streamSid:", streamSid);
       console.log("OpenAI connecté");
 
-      aiSocket.send(JSON.stringify({
-        session: {
-          type: "session update",
-          modalities: ["text", "audio"],
+   
+aiSocket.send(JSON.stringify({
+  type: "session.update",
+  session: {
+    modalities: ["text", "audio"],
           voice: "ash",
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
