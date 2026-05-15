@@ -47,7 +47,7 @@ function loadKnowledgeFolder(folderPath) {
 }
 
 const knowledgeBase = loadKnowledgeFolder("./knowledge");
-const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -195,10 +195,12 @@ wss.on("connection", (ws, req) => {
   ========================= */
 
   function initOpenAI() {
+const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
+
 aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
   headers: {
     Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    "OpenAI-Beta": "realtime=v1",
+    // PAS de OpenAI-Beta ici
   },
 });
     aiSocket.on("open", () => {
