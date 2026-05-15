@@ -211,6 +211,7 @@ aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
 aiSocket.send(JSON.stringify({
   type: "session.update",
   session: {
+     type: "realtime",
     modalities: ["text", "audio"],
           voice: "ash",
           input_audio_format: "g711_ulaw",
