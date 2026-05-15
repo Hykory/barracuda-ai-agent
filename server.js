@@ -1,6 +1,5 @@
 require("dotenv").config();
-
-
+ 
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const WebSocket = require("ws");
@@ -12,29 +11,29 @@ const {
   searchShopifyProducts,
   searchShopifyOrders,
 } = require("./services/shopify");
-
+ 
 console.log("SHOPIFY IMPORT:", {
   searchShopifyProducts: typeof searchShopifyProducts,
   searchShopifyOrders: typeof searchShopifyOrders,
 });
-
+ 
 const { createTransferService } = require("./services/twilioTransfer");
-
+ 
 const twilio = require("twilio");
-
+ 
 const twilioClient = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
-
+ 
 const HUMAN_PHONE_NUMBER = process.env.HUMAN_PHONE_NUMBER;
 const transferCallToHuman = createTransferService(
   twilioClient,
   HUMAN_PHONE_NUMBER
 );
-
+ 
 const systemPrompt = fs.readFileSync("./Prompt-Barracuda.txt", "utf8");
-
+ 
 function loadKnowledgeFolder(folderPath) {
   const files = fs.readdirSync(folderPath).filter((file) => file.endsWith(".txt"));
   return files
@@ -44,11 +43,11 @@ function loadKnowledgeFolder(folderPath) {
     })
     .join("\n");
 }
-
+ 
 const knowledgeBase = loadKnowledgeFolder("./knowledge");
-
+ 
 const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime";
-
+ 
 const app = express();
 const PORT = 3000;
 app.use(cookieParser());
@@ -57,7 +56,7 @@ app.set("views", path.join(__dirname, "views"));
 app.use("/public", express.static("public"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-
+ 
 // Auth dashboard
 function dashboardAuth(req, res, next) {
   const pwd = req.cookies?.dashPwd;
@@ -73,10 +72,11 @@ function dashboardAuth(req, res, next) {
     </form>
   `);
 }
+ 
 /* =========================
    SERVER
 ========================= */
-
+ 
 app.post("/dashboard-login", (req, res) => {
   const pwd = req.body.pwd;
   if (pwd === process.env.DASHBOARD_PASSWORD) {
@@ -86,49 +86,50 @@ app.post("/dashboard-login", (req, res) => {
     res.redirect("/dashboard");
   }
 });
-
+ 
 app.get("/dashboard", dashboardAuth, (req, res) => {
   console.log("DASHBOARD ROUTE HIT");
-
+ 
   try {
     const logFiles = fs.readdirSync("./logs").filter(f => f.endsWith(".json"));
     const logs = logFiles.map((file) => {
       const raw = fs.readFileSync(path.join("./logs", file), "utf8");
       return JSON.parse(raw);
     });
-
+ 
     const totalCalls = logs.length;
     const transferredCalls = logs.filter((log) =>
       log.events?.some((e) => e.type === "transfer_requested")
     ).length;
     const avgDuration =
       logs.reduce((sum, log) => sum + (log.durationSeconds || 0), 0) / (logs.length || 1);
-
+ 
     res.render("dashboard", { totalCalls, transferredCalls, avgDuration, logs });
   } catch (err) {
     console.error("DASHBOARD ERROR:", err);
     res.status(500).send("Erreur dashboard: " + err.message);
   }
 });
-
-const server = app.listen(PORT, () => { 8080, () =>
+ 
+const server = app.listen(PORT, () => {
   console.log(`Serveur lancé sur http://localhost:${PORT}`);
 });
-
-app.use("/", voiceRoutes);    
+ 
+app.use("/", voiceRoutes);
+ 
 /* =========================
    WEBSOCKET TWILIO
 ========================= */
-
+ 
 const wss = new WebSocket.Server({ server, path: "/ws" });
-
+ 
 wss.on("connection", (ws, req) => {
   let isFrench = true;
   let aiSocket = null;
-
+ 
   console.log("Twilio connecté");
   console.log("REQ URL WEBSOCKET:", req.url);
-
+ 
   const callId = Date.now().toString();
   const callLog = {
     callId,
@@ -141,39 +142,38 @@ wss.on("connection", (ws, req) => {
     shopifyOrderSearches: [],
     errors: [],
   };
-
+ 
   console.log("Call ID:", callId);
-
+ 
   let streamSid = null;
   let callSid = null;
   let pendingTransfer = false;
   let isInterrupted = false;
   let currentAiItemId = null;
   let currentAudioDurationMs = 0;
-
+ 
   /* =========================
      MESSAGES TWILIO
   ========================= */
-
+ 
   ws.on("message", (msg) => {
     const data = JSON.parse(msg);
-
+ 
     if (data.event === "start") {
       const languageParam = data.start.customParameters?.language || "fr";
       isFrench = languageParam !== "en";
       streamSid = data.start.streamSid;
       callSid = data.start.callSid;
-
+ 
       console.log("Appel commencé");
       console.log("LANGUE PARAM:", languageParam);
       console.log("IS FRENCH:", isFrench);
       console.log("Stream SID:", streamSid);
       console.log("Call SID:", callSid);
-
-      // ✅ OpenAI démarre ICI, après avoir reçu isFrench et streamSid
+ 
       initOpenAI();
     }
-
+ 
     if (data.event === "media") {
       if (aiSocket && aiSocket.readyState === WebSocket.OPEN) {
         aiSocket.send(JSON.stringify({
@@ -183,11 +183,11 @@ wss.on("connection", (ws, req) => {
       }
     }
   });
-
+ 
   /* =========================
      INIT OPENAI
   ========================= */
-
+ 
   function initOpenAI() {
     aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
       headers: {
@@ -195,10 +195,10 @@ wss.on("connection", (ws, req) => {
         "OpenAI-Beta": "realtime=v1",
       },
     });
-
+ 
     aiSocket.on("open", () => {
       console.log("OpenAI connecté");
-
+ 
       aiSocket.send(JSON.stringify({
         type: "session.update",
         session: {
@@ -206,11 +206,11 @@ wss.on("connection", (ws, req) => {
           voice: "ash",
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
-
+ 
           input_audio_transcription: {
             model: "gpt-4o-mini-transcribe",
           },
-
+ 
           turn_detection: {
             type: "server_vad",
             threshold: 0.7,
@@ -218,7 +218,7 @@ wss.on("connection", (ws, req) => {
             silence_duration_ms: 1200,
             create_response: true,
           },
-
+ 
           tools: [
             {
               type: "function",
@@ -244,24 +244,35 @@ wss.on("connection", (ws, req) => {
                 required: ["query"],
               },
             },
+            // ✅ FIX 1 — tool déclaré pour que l'IA puisse l'appeler
+            {
+              type: "function",
+              name: "transfer_call_to_human",
+              description: "Transfère l'appel à un agent humain de l'équipe.",
+              parameters: {
+                type: "object",
+                properties: {},
+                required: [],
+              },
+            },
           ],
-
+ 
           tool_choice: "auto",
-
+ 
           instructions: `
 LANGUE FORCÉE : ${isFrench ? "Cette conversation est en FRANÇAIS. Tu dois parler uniquement en français, peu importe ce que dit le client." : "This conversation is in ENGLISH. You must speak English only, no matter what the client says."}
-
+ 
 ${systemPrompt}
-
+ 
 BASE DE CONNAISSANCE :
 ${knowledgeBase}
-
+ 
 LANGUE :
 - La langue de l'appel est déjà choisie avant le début de la conversation.
 - Tu dois parler uniquement dans cette langue.
 - Ne change jamais de langue pendant l'appel.
 - Ne mélange jamais français et anglais.
-
+ 
 STYLE TÉLÉPHONE :
 - Réponds court.
 - Parle naturellement comme un humain.
@@ -270,13 +281,13 @@ STYLE TÉLÉPHONE :
 - Maximum 2 à 3 phrases par réponse, sauf si le client demande plus de détails.
 - Après une question, arrête-toi immédiatement et attends la réponse du client.
 - Ne pose jamais une question et sa réponse dans le même message.
-
+ 
 INTERDICTION :
 - Ne dis jamais : "Voulez-vous que je vous explique ?" puis continuer à expliquer.
 - Ne dis jamais : "Voulez-vous en savoir plus ?" puis continuer à expliquer.
 - Exemple interdit : "Voulez-vous savoir comment tester le pH ? Pour tester le pH..."
 - Exemple correct : "Voulez-vous que je vous explique comment tester le pH ?"
-
+ 
 SHOPIFY :
 - Si le client cherche à acheter, demande un prix, demande si un produit est disponible, ou mentionne qu'il veut un produit précis, appelle search_shopify_products.
 - Si le client pose une question de conseil général, réponds d'abord brièvement, sans vendre immédiatement.
@@ -295,7 +306,7 @@ SHOPIFY :
 - Ne pose JAMAIS de question de suivi après une confirmation.
 - Ne fais JAMAIS une nouvelle recherche Shopify après une confirmation.
 - Ne récite pas d'autres produits. La conversation sur ce produit est terminée.
-
+ 
 COMMANDES SHOPIFY :
 - Tu as accès aux commandes Shopify avec la fonction search_shopify_orders.
 - Si le client veut suivre une commande, connaître le statut d'une commande, savoir où est sa commande, ou donne un numéro de commande, appelle search_shopify_orders.
@@ -309,28 +320,27 @@ COMMANDES SHOPIFY :
 - Ne jamais utiliser une recherche vague.
 - Ne jamais appeler search_shopify_orders sans numéro de commande complet.
 Si la commande est trouvée mais tracking est vide, dis :
-"J’ai trouvé votre commande. Elle est présentement non expédiée / en traitement, donc il n’y a pas encore de numéro de suivi."
-
+"J'ai trouvé votre commande. Elle est présentement non expédiée / en traitement, donc il n'y a pas encore de numéro de suivi."
+ 
 TRANSFERT HUMAIN :
-- si le client demande à parler à quelqu'un, à un humain, à un employé ou demande un transfert, appelle immédiatement la fonction transfer_call_to_human.
+- Si le client demande à parler à quelqu'un, à un humain, à un employé ou demande un transfert, appelle immédiatement la fonction transfer_call_to_human.
 - Dis TOUJOURS avant le transfert : "Je vais vous transférer à quelqu'un de l'équipe. Un instant s'il vous plaît."
 - Si le client dit "je veux parler à quelqu'un", "je veux parler à un humain", "transférez-moi", "je veux un employé", ou toute phrase similaire, appelle immédiatement la fonction transfer_call_to_human.
 - Ne réponds pas avec du texte avant d'appeler la fonction.
 - Ne pose aucune question de clarification.
 - N'explique rien.
-
+ 
 ADRESSE :
 - Français : Nous sommes situés au 110 Georges, à Gatineau, secteur Encan Masson.
 - English : We're located at 110 Georges in Gatineau, in the Encan Masson area.
 `,
         },
       }));
-
-      // ✅ streamSid et isFrench sont garantis corrects ici
+ 
       const introText = isFrench
         ? "L'appel commence. Présente-toi avec cette phrase exacte : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
         : "The call starts. Introduce yourself with this exact phrase: Hi, this is Barry from Barracuda Pools. How can I help you today?";
-
+ 
       aiSocket.send(JSON.stringify({
         type: "conversation.item.create",
         item: {
@@ -339,32 +349,32 @@ ADRESSE :
           content: [{ type: "input_text", text: introText }],
         },
       }));
-
+ 
       aiSocket.send(JSON.stringify({ type: "response.create" }));
     });
-
+ 
     /* =========================
        AUDIO OPENAI → TWILIO
     ========================= */
-
+ 
     aiSocket.on("message", async (msg) => {
       const response = JSON.parse(msg);
-
+ 
       console.log("OPENAI EVENT:", response.type, response.name || "");
       if (response.type === "error") {
-  console.log("OPENAI ERROR FULL:", JSON.stringify(response.error, null, 2));
-}
-
+        console.log("OPENAI ERROR FULL:", JSON.stringify(response.error, null, 2));
+      }
+ 
       if (response.type === "input_audio_buffer.speech_started") {
         console.log("🛑 INTERRUPTION — speech started");
         currentAudioDurationMs = 0;
         isInterrupted = true;
-
+ 
         if (streamSid) {
           ws.send(JSON.stringify({ event: "clear", streamSid }));
           console.log("🔇 Twilio audio cleared");
         }
-
+ 
         if (currentAiItemId) {
           aiSocket.send(JSON.stringify({
             type: "conversation.item.truncate",
@@ -375,19 +385,19 @@ ADRESSE :
           console.log(`✂️ Truncate → item ${currentAiItemId} à ${currentAudioDurationMs}ms`);
         }
       }
-
+ 
       if (response.type === "input_audio_buffer.speech_stopped") {
         console.log("🎙️ speech stopped — reset interruption");
         isInterrupted = false;
       }
-
+ 
       if (response.type === "response.output_item.added") {
         currentAiItemId = response.item?.id ?? null;
         currentAudioDurationMs = 0;
         isInterrupted = false;
         console.log("🎯 Nouvel item AI:", currentAiItemId);
       }
-
+ 
       if (response.type === "response.done" && pendingTransfer) {
         pendingTransfer = false;
         console.log("TRANSFERT APRÈS RESPONSE DONE");
@@ -395,19 +405,19 @@ ADRESSE :
         await transferCallToHuman(callSid);
         return;
       }
-
+ 
       if (response.type === "conversation.item.input_audio_transcription.completed") {
         const userText = response.transcript || "";
         const normalizedText = userText.toLowerCase();
-
+ 
         callLog.messages.push({
           role: "user",
           text: userText,
           time: new Date().toISOString(),
         });
-
+ 
         console.log("USER LOGGED:", userText);
-
+ 
         const wantsHuman =
           normalizedText.includes("parler à quelqu") ||
           normalizedText.includes("parler a quelqu") ||
@@ -423,23 +433,23 @@ ADRESSE :
           normalizedText.includes("transferer") ||
           normalizedText.includes("parler à unemployé") ||
           normalizedText.includes("talk to an employe");
-
+ 
         console.log("DEBUG wantsHuman:", wantsHuman);
         console.log("DEBUG userText:", userText);
         console.log("DEBUG normalizedText:", normalizedText);
-
+ 
         if (wantsHuman) {
           console.log("TRANSFERT DÉTECTÉ PAR TEXTE");
-
+ 
           callLog.events.push({
             type: "transfer_requested",
             reason: "client demande un humain",
             time: new Date().toISOString(),
           });
-
+ 
           writeCallLog(callId, callLog);
           pendingTransfer = true;
-
+ 
           aiSocket.send(JSON.stringify({
             type: "conversation.item.create",
             item: {
@@ -453,71 +463,96 @@ ADRESSE :
               ],
             },
           }));
-
+ 
           aiSocket.send(JSON.stringify({ type: "response.create" }));
           return;
         }
-
+ 
         try {
           writeCallLog(callId, callLog);
         } catch (err) {
           console.error("LOG WRITE ERROR USER:", err);
         }
       }
-
+ 
       if (response.type === "response.audio_transcript.delta") {
         if (!callLog.currentAssistantText) callLog.currentAssistantText = "";
         callLog.currentAssistantText += response.delta || "";
       }
-
+ 
       if (response.type === "response.audio_transcript.done") {
         const finalText =
           response.transcript ||
           response.text ||
           callLog.currentAssistantText ||
           "";
-
+ 
         callLog.messages.push({
           role: "assistant",
           text: finalText,
           time: new Date().toISOString(),
         });
-
+ 
         console.log("AI LOGGED:", finalText);
         callLog.currentAssistantText = "";
         writeCallLog(callId, callLog);
       }
-
+ 
       if (response.type === "response.audio.delta") {
         if (!streamSid) return;
-
+ 
         const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
         currentAudioDurationMs += payloadBytes / 8;
-
+ 
         ws.send(JSON.stringify({
           event: "media",
           streamSid,
           media: { payload: response.delta },
         }));
       }
-
+ 
       if (response.type === "response.function_call_arguments.done") {
         console.log("FUNCTION CALL:", response.name, response.call_id, response.arguments);
-
+ 
         const args = JSON.parse(response.arguments);
-
+ 
+        // ✅ FIX 2 — handler pour transfer_call_to_human
+        if (response.name === "transfer_call_to_human") {
+          console.log("TRANSFERT VIA TOOL CALL");
+ 
+          callLog.events.push({
+            type: "transfer_requested",
+            reason: "AI tool call",
+            time: new Date().toISOString(),
+          });
+          writeCallLog(callId, callLog);
+          pendingTransfer = true;
+ 
+          aiSocket.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "function_call_output",
+              call_id: response.call_id,
+              output: JSON.stringify({ success: true }),
+            },
+          }));
+ 
+          aiSocket.send(JSON.stringify({ type: "response.create" }));
+          return;
+        }
+ 
         if (response.name === "search_shopify_products") {
           const shopifyData = await searchShopifyProducts(args.query);
-
+ 
           callLog.shopifySearches.push({
             query: args.query,
             time: new Date().toISOString(),
             raw: shopifyData,
           });
-
+ 
           const products = shopifyData?.data?.products?.edges || [];
           let result;
-
+ 
           if (products.length === 0) {
             result = { found: false, message: "Aucun produit trouvé." };
           } else {
@@ -534,35 +569,38 @@ ADRESSE :
               })),
             };
           }
-
-        aiSocket.send(JSON.stringify({
-  type: "conversation.item.create",
-  item: {
-    type: "function_call_output",
-    call_id: response.call_id,
-    output: JSON.stringify(result),
-  },
-}));
-
-aiSocket.send(JSON.stringify({
-  type: "response.create",
-  response: {
-    modalities: ["audio", "text"],
-    instructions: `
-Réponds maintenant au client avec les informations de la commande.
+ 
+          aiSocket.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "function_call_output",
+              call_id: response.call_id,
+              output: JSON.stringify(result),
+            },
+          }));
+ 
+          // ✅ FIX 3 — instructions correctes pour les produits (pas les commandes)
+          aiSocket.send(JSON.stringify({
+            type: "response.create",
+            response: {
+              modalities: ["audio", "text"],
+              instructions: `
+Réponds maintenant au client avec les produits trouvés.
 Sois court et naturel.
-Si la commande est non expédiée, dis qu'elle n'a pas encore été envoyée.
-Si tracking est vide, dis qu'il n'y a pas encore de numéro de suivi.
-`
-  }
-}));
-
-return;
- }
+Propose maximum 2 ou 3 options avec le nom, le prix et le stock.
+Si un seul produit, annonce-le simplement.
+Ne récite pas toute la liste si ce n'est pas nécessaire.
+`,
+            },
+          }));
+ 
+          return;
+        }
+ 
         if (response.name === "search_shopify_orders") {
           const query = args.query?.trim();
           const isValidOrderSearch = query && query.startsWith("#");
-
+ 
           if (!isValidOrderSearch) {
             aiSocket.send(JSON.stringify({
               type: "conversation.item.create",
@@ -575,33 +613,33 @@ return;
                 }),
               },
             }));
-
+ 
             aiSocket.send(JSON.stringify({ type: "response.create" }));
             return;
           }
-
+ 
           const shopifyData = await searchShopifyOrders(query);
-
+ 
           callLog.shopifyOrderSearches.push({
             query,
             time: new Date().toISOString(),
             raw: shopifyData,
           });
-
+ 
           writeCallLog(callId, callLog);
           console.log("SHOPIFY ORDER SEARCH:", JSON.stringify(shopifyData, null, 2));
-
+ 
           const orders = shopifyData?.data?.orders?.edges || [];
           let result;
-
+ 
           if (orders.length === 0) {
             result = {
               found: false,
               message: "Aucune commande trouvée. Je vais vous transférer à quelqu'un de l'équipe. Un instant s'il vous plaît.",
             };
-
+ 
             pendingTransfer = true;
-
+ 
             aiSocket.send(JSON.stringify({
               type: "conversation.item.create",
               item: {
@@ -610,7 +648,7 @@ return;
                 output: JSON.stringify(result),
               },
             }));
-
+ 
             aiSocket.send(JSON.stringify({ type: "response.create" }));
             return;
           } else {
@@ -637,7 +675,7 @@ return;
               })),
             };
           }
-
+ 
           aiSocket.send(JSON.stringify({
             type: "conversation.item.create",
             item: {
@@ -646,23 +684,23 @@ return;
               output: JSON.stringify(result),
             },
           }));
-
+ 
           aiSocket.send(JSON.stringify({ type: "response.create" }));
           return;
         }
       }
     }); // ferme aiSocket.on("message")
-
+ 
     aiSocket.on("error", (err) => {
       console.error("Erreur OpenAI:", err);
     });
-
+ 
   } // ferme initOpenAI
-
+ 
   /* =========================
      CLOSE / ERROR
   ========================= */
-
+ 
   ws.on("close", () => {
     try {
       callLog.endedAt = new Date().toISOString();
@@ -674,16 +712,16 @@ return;
     } catch (err) {
       console.error("Erreur log fermeture:", err.message);
     }
-
+ 
     console.log("Twilio fermé");
-
+ 
     if (aiSocket && aiSocket.readyState === WebSocket.OPEN) {
       aiSocket.close();
     }
   });
-
+ 
   ws.on("error", (err) => {
     console.error("Erreur Twilio:", err.message);
   });
-
+ 
 }); // ferme wss.on("connection")
