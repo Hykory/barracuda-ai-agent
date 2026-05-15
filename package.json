@@ -13,10 +13,11 @@
   "type": "commonjs",
   "dependencies": {
     "@shopify/shopify-api": "^13.0.0",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "ejs": "^5.0.2",
     "express": "^5.2.1",
-    "openai": "^6.36.0",
+    "openai": "^6.37.0",
     "twilio": "^6.0.2",
     "ws": "^8.20.0"
   }

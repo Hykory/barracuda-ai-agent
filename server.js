@@ -1,9 +1,12 @@
 require("dotenv").config();
 
+
 const express = require("express");
+const cookieParser = require("cookie-parser");
 const WebSocket = require("ws");
 const fs = require("fs");
 const path = require("path");
+const smsRoutes = require("./routes/sms");
 const voiceRoutes = require("./routes/voice");
 const { writeCallLog } = require("./services/logs");
 const {
@@ -45,43 +48,78 @@ function loadKnowledgeFolder(folderPath) {
 
 const knowledgeBase = loadKnowledgeFolder("./knowledge");
 
-const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime";
 
 const app = express();
-const PORT = 3000;
-
+const PORT = process.env.PORT || 3000;
+app.use(cookieParser());
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 app.use("/public", express.static("public"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-app.use("/", voiceRoutes);
 
+// Auth dashboard
+function dashboardAuth(req, res, next) {
+  const pwd = req.cookies?.dashPwd;
+  if (pwd === process.env.DASHBOARD_PASSWORD) return next();
+  res.send(`
+    <form method="POST" action="/dashboard-login" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#0a0c10;gap:12px;">
+      <input name="pwd" type="password" placeholder="Mot de passe" autofocus
+        style="padding:12px 20px;border-radius:8px;border:1px solid #1e2230;background:#111318;color:#e8eaf0;font-size:14px;width:260px;"/>
+      <button type="submit"
+        style="padding:12px 20px;border-radius:8px;border:none;background:#00e5ff;color:#0a0c10;font-weight:700;cursor:pointer;width:260px;">
+        Entrer
+      </button>
+    </form>
+  `);
+}
 /* =========================
    SERVER
 ========================= */
 
-app.get("/dashboard", (req, res) => {
-  console.log("DASHBOARD ROUTE HIT");
-
-  const logFiles = fs.readdirSync("./logs");
-  const logs = logFiles.map((file) => {
-    const raw = fs.readFileSync(path.join("./logs", file), "utf8");
-    return JSON.parse(raw);
-  });
-
-  const totalCalls = logs.length;
-  const transferredCalls = logs.filter((log) =>
-    log.events?.some((e) => e.type === "transfer_requested")
-  ).length;
-  const avgDuration =
-    logs.reduce((sum, log) => sum + (log.durationSeconds || 0), 0) / (logs.length || 1);
-
-  res.render("dashboard", { totalCalls, transferredCalls, avgDuration, logs });
+app.post("/dashboard-login", (req, res) => {
+  const pwd = req.body.pwd;
+  if (pwd === process.env.DASHBOARD_PASSWORD) {
+    res.cookie("dashPwd", pwd, { httpOnly: true, maxAge: 86400000 }); // 24h
+    res.redirect("/dashboard");
+  } else {
+    res.redirect("/dashboard");
+  }
 });
 
-const server = app.listen(PORT, () => {
-  console.log(`Serveur lancé sur http://localhost:${PORT}`);
+app.get("/dashboard", dashboardAuth, (req, res) => {
+  console.log("DASHBOARD ROUTE HIT");
+
+  try {
+    const logFiles = fs.readdirSync("./logs").filter(f => f.endsWith(".json"));
+    const logs = logFiles.map((file) => {
+      const raw = fs.readFileSync(path.join("./logs", file), "utf8");
+      return JSON.parse(raw);
+    });
+
+    const totalCalls = logs.length;
+    const transferredCalls = logs.filter((log) =>
+      log.events?.some((e) => e.type === "transfer_requested")
+    ).length;
+    const avgDuration =
+      logs.reduce((sum, log) => sum + (log.durationSeconds || 0), 0) / (logs.length || 1);
+
+    res.render("dashboard", { totalCalls, transferredCalls, avgDuration, logs });
+  } catch (err) {
+    console.error("DASHBOARD ERROR:", err);
+    res.status(500).send("Erreur dashboard: " + err.message);
+  }
+});
+
+app.get("/", (req, res) => {
+  res.send("Piscine Barracuda AI is online 🚀");
+});
+
+app.use("/", voiceRoutes);    
+app.use("/", smsRoutes(knowledgeBase));
+
+const server = app.listen(PORT, "0.0.0.0", () => { 
+  console.log(`Serveur lancé sur le port ${PORT}`);
 });
 
 /* =========================
@@ -157,28 +195,27 @@ wss.on("connection", (ws, req) => {
   ========================= */
 
   function initOpenAI() {
-    aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "OpenAI-Beta": "realtime=v1",
-      },
-    });
+const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
 
+aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
+  headers: {
+    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    // PAS de OpenAI-Beta ici
+  },
+});
     aiSocket.on("open", () => {
+      console.log("✅ OpenAI connecté, isFrench:", isFrench, "streamSid:", streamSid);
       console.log("OpenAI connecté");
 
-      aiSocket.send(JSON.stringify({
-        type: "session.update",
-        session: {
-          modalities: ["text", "audio"],
+   
+aiSocket.send(JSON.stringify({
+  type: "session.update",
+  session: {
+     type: "realtime",
           voice: "ash",
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
-
-          input_audio_transcription: {
-            model: "gpt-4o-mini-transcribe",
-          },
-
+          input_audio_transcription: {model: "whisper-1"},
           turn_detection: {
             type: "server_vad",
             threshold: 0.7,
@@ -201,6 +238,16 @@ wss.on("connection", (ws, req) => {
               },
             },
             {
+  type: "function",
+  name: "transfer_call_to_human",
+  description: "Transfère l'appel à un humain de l'équipe.",
+  parameters: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
+},
+            {
               type: "function",
               name: "search_shopify_orders",
               description: "Cherche une commande Shopify par numéro de commande.",
@@ -214,7 +261,7 @@ wss.on("connection", (ws, req) => {
             },
           ],
 
-          tool_choice: "auto",
+          
 
           instructions: `
 LANGUE FORCÉE : ${isFrench ? "Cette conversation est en FRANÇAIS. Tu dois parler uniquement en français, peu importe ce que dit le client." : "This conversation is in ENGLISH. You must speak English only, no matter what the client says."}
@@ -229,6 +276,12 @@ LANGUE :
 - Tu dois parler uniquement dans cette langue.
 - Ne change jamais de langue pendant l'appel.
 - Ne mélange jamais français et anglais.
+
+INTRODUCTION :
+- Dis la phrase d’introduction seulement au tout début de l’appel ou de la converstation sms.
+- Ne répète jamais la phrase d’introduction après.
+- Si tu ne comprends pas le client, dis plutôt : "Désolé, je n’ai pas bien compris. Pouvez-vous répéter ?"
+- Ne recommence jamais avec "Bonjour, ici Barry..." pour gérer une incompréhension.
 
 STYLE TÉLÉPHONE :
 - Réponds court.
@@ -286,7 +339,29 @@ TRANSFERT HUMAIN :
 - Ne réponds pas avec du texte avant d'appeler la fonction.
 - Ne pose aucune question de clarification.
 - N'explique rien.
-- Appelle obligatoirement transfer_call_to_human avec reason: "client demande un humain".
+
+HEURES D’OUVERTURE :
+
+* Si le client demande si le magasin est ouvert, considère cela comme une question sur les heures d’ouverture.
+* Exemples :
+
+  * "êtes-vous ouvert"
+  * "vous êtes ouverts"
+  * "est-ce ouvert"
+  * "êtes-vous encore ouverts"
+  * "vous fermez quand"
+  * "à quelle heure vous ouvrez"
+* Réponds directement avec les heures d’ouverture actuelles.
+* Ne réponds jamais "je ne sais pas" si les heures sont dans la base de connaissance.
+
+INTERPRÉTATION :
+
+* Comprends les questions naturelles du client même si elles ne sont pas formulées exactement.
+* "Êtes-vous ouvert ?" = demande d’heures d’ouverture.
+* "Où êtes-vous ?" = demande d’adresse.
+* "Avez-vous du chlore ?" = recherche produit Shopify.
+
+
 
 ADRESSE :
 - Français : Nous sommes situés au 110 Georges, à Gatineau, secteur Encan Masson.
@@ -296,20 +371,15 @@ ADRESSE :
       }));
 
       // ✅ streamSid et isFrench sont garantis corrects ici
-      const introText = isFrench
-        ? "L'appel commence. Présente-toi avec cette phrase exacte : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
-        : "The call starts. Introduce yourself with this exact phrase: Hi, this is Barry from Barracuda Pools. How can I help you today?";
-
-      aiSocket.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [{ type: "input_text", text: introText }],
-        },
-      }));
-
-      aiSocket.send(JSON.stringify({ type: "response.create" }));
+     aiSocket.send(JSON.stringify({
+  type: "response.create",
+  response: {
+        modalities: ["text", "audio"], 
+    instructions: isFrench
+      ? "Dis uniquement cette phrase une seule fois : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
+      : "Say only this sentence once: Hi, this is Barry from Barracuda Pools. How can I help you today?"
+  }
+}));
     });
 
     /* =========================
@@ -320,6 +390,9 @@ ADRESSE :
       const response = JSON.parse(msg);
 
       console.log("OPENAI EVENT:", response.type, response.name || "");
+      if (response.type === "error") {
+  console.log("OPENAI ERROR FULL:", JSON.stringify(response.error, null, 2));
+}
 
       if (response.type === "input_audio_buffer.speech_started") {
         console.log("🛑 INTERRUPTION — speech started");
@@ -387,8 +460,8 @@ ADRESSE :
           normalizedText.includes("transfert") ||
           normalizedText.includes("transférer") ||
           normalizedText.includes("transferer") ||
-          normalizedText.includes("employé") ||
-          normalizedText.includes("employe");
+          normalizedText.includes("parler à unemployé") ||
+          normalizedText.includes("talk to an employe");
 
         console.log("DEBUG wantsHuman:", wantsHuman);
         console.log("DEBUG userText:", userText);
@@ -431,12 +504,12 @@ ADRESSE :
         }
       }
 
-      if (response.type === "response.audio_transcript.delta") {
+      if (response.type === "response.output_audio_transcript.delta") {
         if (!callLog.currentAssistantText) callLog.currentAssistantText = "";
         callLog.currentAssistantText += response.delta || "";
       }
 
-      if (response.type === "response.audio_transcript.done") {
+      if (response.type === "response.output_audio_transcript.done") {
         const finalText =
           response.transcript ||
           response.text ||
@@ -454,18 +527,20 @@ ADRESSE :
         writeCallLog(callId, callLog);
       }
 
-      if (response.type === "response.audio.delta") {
-        if (!streamSid) return;
+if (response.type === "response.output_audio.delta") {
+  if (!streamSid) return;
 
-        const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
-        currentAudioDurationMs += payloadBytes / 8;
+  const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
+  currentAudioDurationMs += payloadBytes / 8;
 
-        ws.send(JSON.stringify({
-          event: "media",
-          streamSid,
-          media: { payload: response.delta },
-        }));
-      }
+  ws.send(JSON.stringify({
+    event: "media",
+    streamSid,
+    media: { payload: response.delta },
+  }));
+}
+
+      
 
       if (response.type === "response.function_call_arguments.done") {
         console.log("FUNCTION CALL:", response.name, response.call_id, response.arguments);
@@ -513,7 +588,7 @@ ADRESSE :
 aiSocket.send(JSON.stringify({
   type: "response.create",
   response: {
-    modalities: ["audio", "text"],
+    
     instructions: `
 Réponds maintenant au client avec les informations de la commande.
 Sois court et naturel.
@@ -653,3 +728,6 @@ return;
   });
 
 }); // ferme wss.on("connection")
+
+
+
