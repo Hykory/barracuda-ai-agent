@@ -4,10 +4,8 @@ require("dotenv").config();
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const WebSocket = require("ws");
-const pcmu = require("pcm-convert"); 
 const fs = require("fs");
 const path = require("path");
-const smsRoutes = require("./routes/sms");
 const voiceRoutes = require("./routes/voice");
 const { writeCallLog } = require("./services/logs");
 const {
@@ -49,9 +47,10 @@ function loadKnowledgeFolder(folderPath) {
 
 const knowledgeBase = loadKnowledgeFolder("./knowledge");
 
+const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 app.use(cookieParser());
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
@@ -112,17 +111,11 @@ app.get("/dashboard", dashboardAuth, (req, res) => {
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("Piscine Barracuda AI is online 🚀");
+const server = app.listen(PORT, () => {
+  console.log(`Serveur lancé sur http://localhost:${PORT}`);
 });
 
 app.use("/", voiceRoutes);    
-app.use("/", smsRoutes(knowledgeBase));
-
-const server = app.listen(PORT, "0.0.0.0", () => { 
-  console.log(`Serveur lancé sur le port ${PORT}`);
-});
-
 /* =========================
    WEBSOCKET TWILIO
 ========================= */
@@ -196,49 +189,28 @@ wss.on("connection", (ws, req) => {
   ========================= */
 
   function initOpenAI() {
-const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-realtime";
+    aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "OpenAI-Beta": "realtime=v1",
+      },
+    });
 
-aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
-  headers: {
-    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    // PAS de OpenAI-Beta ici
-  },
-});
     aiSocket.on("open", () => {
-      console.log("✅ OpenAI connecté, isFrench:", isFrench, "streamSid:", streamSid);
       console.log("OpenAI connecté");
 
-aiSocket.send(JSON.stringify({
-  type: "session.update",
-  session: {
-<<<<<<< HEAD
-    type: "realtime",
-    model: "gpt-realtime",
-    output_modalities: ["audio"],
-    audio: {
-      input: {
-        format: { type: "audio/pcmu" },
-        turn_detection: {
-          type: "server_vad",
-          threshold: 0.7,
-          prefix_padding_ms: 500,
-          silence_duration_ms: 1200,
-          create_response: true,
-        },
-      },
-      output: {
-        format: { type: "audio/pcmu" },
-        voice: "ash",
-      },
-    },
-    tools: [
-=======
-     type: "realtime",
-    modalities: ["text", "audio"],
+      aiSocket.send(JSON.stringify({
+        type: "session.update",
+        session: {
+          modalities: ["text", "audio"],
           voice: "ash",
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
-          input_audio_transcription: {model: "whisper-1"},
+
+          input_audio_transcription: {
+            model: "gpt-4o-mini-transcribe",
+          },
+
           turn_detection: {
             type: "server_vad",
             threshold: 0.7,
@@ -248,7 +220,6 @@ aiSocket.send(JSON.stringify({
           },
 
           tools: [
->>>>>>> parent of 572421b (voice14)
             {
               type: "function",
               name: "search_shopify_products",
@@ -261,16 +232,6 @@ aiSocket.send(JSON.stringify({
                 required: ["query"],
               },
             },
-            {
-  type: "function",
-  name: "transfer_call_to_human",
-  description: "Transfère l'appel à un humain de l'équipe.",
-  parameters: {
-    type: "object",
-    properties: {},
-    required: [],
-  },
-},
             {
               type: "function",
               name: "search_shopify_orders",
@@ -285,7 +246,7 @@ aiSocket.send(JSON.stringify({
             },
           ],
 
-          
+          tool_choice: "auto",
 
           instructions: `
 LANGUE FORCÉE : ${isFrench ? "Cette conversation est en FRANÇAIS. Tu dois parler uniquement en français, peu importe ce que dit le client." : "This conversation is in ENGLISH. You must speak English only, no matter what the client says."}
@@ -300,12 +261,6 @@ LANGUE :
 - Tu dois parler uniquement dans cette langue.
 - Ne change jamais de langue pendant l'appel.
 - Ne mélange jamais français et anglais.
-
-INTRODUCTION :
-- Dis la phrase d’introduction seulement au tout début de l’appel ou de la converstation sms.
-- Ne répète jamais la phrase d’introduction après.
-- Si tu ne comprends pas le client, dis plutôt : "Désolé, je n’ai pas bien compris. Pouvez-vous répéter ?"
-- Ne recommence jamais avec "Bonjour, ici Barry..." pour gérer une incompréhension.
 
 STYLE TÉLÉPHONE :
 - Réponds court.
@@ -364,29 +319,6 @@ TRANSFERT HUMAIN :
 - Ne pose aucune question de clarification.
 - N'explique rien.
 
-HEURES D’OUVERTURE :
-
-* Si le client demande si le magasin est ouvert, considère cela comme une question sur les heures d’ouverture.
-* Exemples :
-
-  * "êtes-vous ouvert"
-  * "vous êtes ouverts"
-  * "est-ce ouvert"
-  * "êtes-vous encore ouverts"
-  * "vous fermez quand"
-  * "à quelle heure vous ouvrez"
-* Réponds directement avec les heures d’ouverture actuelles.
-* Ne réponds jamais "je ne sais pas" si les heures sont dans la base de connaissance.
-
-INTERPRÉTATION :
-
-* Comprends les questions naturelles du client même si elles ne sont pas formulées exactement.
-* "Êtes-vous ouvert ?" = demande d’heures d’ouverture.
-* "Où êtes-vous ?" = demande d’adresse.
-* "Avez-vous du chlore ?" = recherche produit Shopify.
-
-
-
 ADRESSE :
 - Français : Nous sommes situés au 110 Georges, à Gatineau, secteur Encan Masson.
 - English : We're located at 110 Georges in Gatineau, in the Encan Masson area.
@@ -395,18 +327,20 @@ ADRESSE :
       }));
 
       // ✅ streamSid et isFrench sont garantis corrects ici
-     aiSocket.send(JSON.stringify({
-  type: "response.create",
-  response: {
-<<<<<<< HEAD
-        
-=======
->>>>>>> parent of 572421b (voice14)
-    instructions: isFrench
-      ? "Dis uniquement cette phrase une seule fois : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
-      : "Say only this sentence once: Hi, this is Barry from Barracuda Pools. How can I help you today?"
-  }
-}));
+      const introText = isFrench
+        ? "L'appel commence. Présente-toi avec cette phrase exacte : Bonjour, ici Barry de Piscine Barracuda. Comment puis-je vous aider aujourd'hui ?"
+        : "The call starts. Introduce yourself with this exact phrase: Hi, this is Barry from Barracuda Pools. How can I help you today?";
+
+      aiSocket.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: introText }],
+        },
+      }));
+
+      aiSocket.send(JSON.stringify({ type: "response.create" }));
     });
 
     /* =========================
@@ -531,12 +465,12 @@ ADRESSE :
         }
       }
 
-      if (response.type === "response.output_audio_transcript.delta") {
+      if (response.type === "response.audio_transcript.delta") {
         if (!callLog.currentAssistantText) callLog.currentAssistantText = "";
         callLog.currentAssistantText += response.delta || "";
       }
 
-      if (response.type === "response.output_audio_transcript.done") {
+      if (response.type === "response.audio_transcript.done") {
         const finalText =
           response.transcript ||
           response.text ||
@@ -554,24 +488,18 @@ ADRESSE :
         writeCallLog(callId, callLog);
       }
 
-if (response.type === "response.output_audio.delta") {
-  if (!streamSid) return;
+      if (response.type === "response.audio.delta") {
+        if (!streamSid) return;
 
-  // Convertir PCM16 → μ-law base64 pour Twilio
-  const muLawBase64 = pcmu.linear16ToMuLaw(Buffer.from(response.delta, "base64")).toString("base64");
+        const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
+        currentAudioDurationMs += payloadBytes / 8;
 
-  // Mettre à jour la durée audio
-  const payloadBytes = Math.floor(muLawBase64.length * 0.75);
-  currentAudioDurationMs += payloadBytes / 8;
-
-  ws.send(JSON.stringify({
-    event: "media",
-    streamSid,
-    media: { payload: muLawBase64 },
-  }));
-}
-
-      
+        ws.send(JSON.stringify({
+          event: "media",
+          streamSid,
+          media: { payload: response.delta },
+        }));
+      }
 
       if (response.type === "response.function_call_arguments.done") {
         console.log("FUNCTION CALL:", response.name, response.call_id, response.arguments);
@@ -619,7 +547,7 @@ if (response.type === "response.output_audio.delta") {
 aiSocket.send(JSON.stringify({
   type: "response.create",
   response: {
-    
+    modalities: ["audio", "text"],
     instructions: `
 Réponds maintenant au client avec les informations de la commande.
 Sois court et naturel.
@@ -759,6 +687,3 @@ return;
   });
 
 }); // ferme wss.on("connection")
-
-
-
