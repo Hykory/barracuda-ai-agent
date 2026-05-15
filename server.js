@@ -47,7 +47,7 @@ function loadKnowledgeFolder(folderPath) {
 }
 
 const knowledgeBase = loadKnowledgeFolder("./knowledge");
-const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview";
+const OPENAI_REALTIME_URL = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -195,13 +195,12 @@ wss.on("connection", (ws, req) => {
   ========================= */
 
   function initOpenAI() {
-    aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
-      headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-       
-      },
-    });
-
+aiSocket = new WebSocket(OPENAI_REALTIME_URL, {
+  headers: {
+    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+    "OpenAI-Beta": "realtime=v1",
+  },
+});
     aiSocket.on("open", () => {
       console.log("✅ OpenAI connecté, isFrench:", isFrench, "streamSid:", streamSid);
       console.log("OpenAI connecté");
@@ -210,19 +209,11 @@ wss.on("connection", (ws, req) => {
 aiSocket.send(JSON.stringify({
   type: "session.update",
   session: {
-    type: "realtime",
     modalities: ["text", "audio"],
           voice: "ash",
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
-
-        //  input_audio_transcription: {
-          //  model: "gpt-4o-mini-transcribe",
-          //},
-          input_audio_transcription: {
-  model: "whisper-1",
-},
-
+          input_audio_transcription: {model: "whisper-1"},
           turn_detection: {
             type: "server_vad",
             threshold: 0.7,
