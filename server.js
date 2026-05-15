@@ -210,6 +210,7 @@ wss.on("connection", (ws, req) => {
 aiSocket.send(JSON.stringify({
   type: "session.update",
   session: {
+    type: "realtime",
     modalities: ["text", "audio"],
           voice: "ash",
           input_audio_format: "g711_ulaw",
