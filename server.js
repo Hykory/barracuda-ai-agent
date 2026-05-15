@@ -4,6 +4,7 @@ require("dotenv").config();
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const WebSocket = require("ws");
+const pcmu = require("pcm-convert"); 
 const fs = require("fs");
 const path = require("path");
 const smsRoutes = require("./routes/sms");
@@ -229,7 +230,6 @@ aiSocket.send(JSON.stringify({
         voice: "ash",
       },
     },
-    input_audio_transcription: { model: "whisper-1" },
     tools: [
             {
               type: "function",
@@ -536,13 +536,17 @@ ADRESSE :
 if (response.type === "response.output_audio.delta") {
   if (!streamSid) return;
 
-  const payloadBytes = Math.floor((response.delta?.length ?? 0) * 0.75);
+  // Convertir PCM16 → μ-law base64 pour Twilio
+  const muLawBase64 = pcmu.linear16ToMuLaw(Buffer.from(response.delta, "base64")).toString("base64");
+
+  // Mettre à jour la durée audio
+  const payloadBytes = Math.floor(muLawBase64.length * 0.75);
   currentAudioDurationMs += payloadBytes / 8;
 
   ws.send(JSON.stringify({
     event: "media",
     streamSid,
-    media: { payload: response.delta },
+    media: { payload: muLawBase64 },
   }));
 }
 
